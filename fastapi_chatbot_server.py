@@ -220,7 +220,8 @@ async def root():
         "service": "Ace Cloud Hosting Support Bot",
         "version": "1.0.0",
         "endpoints": {
-            "chat": "/chat",
+            "salesiq_webhook": "/webhook/salesiq (Use this for SalesIQ)",
+            "chat": "/chat (For n8n integration)",
             "reset": "/reset/{session_id}",
             "health": "/health"
         }
@@ -235,6 +236,103 @@ async def health():
         "openai": "connected",
         "active_sessions": len(conversations)
     }
+
+@app.post("/webhook/salesiq")
+async def salesiq_webhook(request: dict):
+    """
+    Direct webhook endpoint for Zoho SalesIQ.
+    Handles SalesIQ's webhook format and returns response in the exact format SalesIQ expects.
+    
+    Expected Input:
+    {
+        "session_id": "abc123",
+        "message": {"text": "user message"}
+    }
+    
+    Required Output:
+    {
+        "action": "reply",
+        "replies": ["bot response"],
+        "session_id": "abc123"
+    }
+    """
+    try:
+        # Log incoming request for debugging
+        print(f"[SalesIQ] Received: {request}")
+        
+        # Extract session_id
+        session_id = request.get('session_id', 'unknown')
+        
+        # Extract message text from nested structure
+        message_obj = request.get('message', {})
+        message_text = message_obj.get('text', '') if isinstance(message_obj, dict) else str(message_obj)
+        
+        # Handle empty messages (greeting)
+        if not message_text or message_text.strip() == '':
+            print(f"[SalesIQ] Empty message, sending greeting")
+            return {
+                "action": "reply",
+                "replies": ["Hi! I'm AceBuddy, your Ace Cloud Hosting support assistant. What can I help you with today?"],
+                "session_id": session_id
+            }
+        
+        print(f"[SalesIQ] Session: {session_id}, Message: {message_text}")
+        
+        # Get or create conversation history
+        if session_id not in conversations:
+            conversations[session_id] = []
+        
+        history = conversations[session_id]
+        
+        # Determine if new issue
+        new_issue = is_new_issue(message_text, history)
+        
+        context = None
+        
+        # If new issue, retrieve context from Pinecone
+        if new_issue:
+            print(f"[SalesIQ] New issue detected, retrieving context...")
+            try:
+                context_docs = retrieve_context(message_text, top_k=3)
+                if context_docs:
+                    context = build_context(context_docs)
+                    print(f"[SalesIQ] Retrieved {len(context_docs)} context documents")
+            except Exception as e:
+                print(f"[SalesIQ] Context retrieval failed: {str(e)}")
+                # Continue without context
+        
+        # Generate response
+        print(f"[SalesIQ] Calling OpenAI...")
+        response_text = generate_response(message_text, history, context)
+        
+        # Clean response - remove markdown, keep it short
+        response_text = response_text.replace('**', '').replace('*', '').strip()
+        
+        # Limit to 200 characters for SalesIQ
+        if len(response_text) > 200:
+            response_text = response_text[:197] + "..."
+        
+        print(f"[SalesIQ] Response: {response_text}")
+        
+        # Update conversation history
+        conversations[session_id].append({"role": "user", "content": message_text})
+        conversations[session_id].append({"role": "assistant", "content": response_text})
+        
+        # Return in EXACT SalesIQ expected format
+        return {
+            "action": "reply",
+            "replies": [response_text],
+            "session_id": session_id
+        }
+        
+    except Exception as e:
+        print(f"[SalesIQ] ERROR: {str(e)}")
+        # Return error in SalesIQ format
+        return {
+            "action": "reply",
+            "replies": ["I'm having technical difficulties. Please call our support team at 1-888-415-5240."],
+            "session_id": request.get('session_id', 'unknown')
+        }
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
