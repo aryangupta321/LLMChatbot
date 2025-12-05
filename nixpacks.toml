@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["python39"]
-
-[phases.install]
-cmds = ["pip install -r requirements_production.txt"]
-
-[start]
-cmd = "python fastapi_chatbot_server.py"
