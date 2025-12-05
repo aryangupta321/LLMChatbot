@@ -325,6 +325,27 @@ async def salesiq_webhook(request: dict):
         
         history = conversations[session_id]
         
+        # Handle simple greetings without RAG
+        message_lower = message_text.lower().strip()
+        greeting_patterns = [
+            'hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening',
+            'hi there', 'hello there', 'hey there', 'greetings', 'howdy'
+        ]
+        
+        # Check if message is ONLY a greeting (no technical question)
+        is_greeting = (
+            message_lower in greeting_patterns or
+            (len(message_text.split()) <= 3 and any(g in message_lower for g in ['hello', 'hi', 'hey', 'morning', 'afternoon', 'evening']))
+        )
+        
+        if is_greeting and len(history) == 0:
+            print(f"[SalesIQ] Simple greeting detected")
+            return {
+                "action": "reply",
+                "replies": ["Hello! How can I assist you today?"],
+                "session_id": session_id
+            }
+        
         # Determine if new issue
         new_issue = is_new_issue(message_text, history)
         
