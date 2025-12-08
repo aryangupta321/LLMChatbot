@@ -95,10 +95,16 @@ def retrieve_context(query: str, top_k: int = 3):
     Retrieve relevant documents from Pinecone.
     Prioritizes KB articles over chat transcripts.
     """
+    # Expand short queries for better retrieval
+    expanded_query = query
+    if len(query.split()) <= 4:
+        # Add context words for better matching
+        expanded_query = f"How to {query} in QuickBooks"
+    
     # Generate query embedding
     response = openai_client.embeddings.create(
         model=EMBEDDING_MODEL,
-        input=query
+        input=expanded_query
     )
     query_embedding = response.data[0].embedding
     
@@ -155,6 +161,13 @@ def is_new_issue(message: str, history: List[Dict]) -> bool:
     
     # Simple continuation keywords (1-3 words)
     continuation_keywords = ["yes", "done", "completed", "next", "ok", "okay", "continue"]
+    
+    # Resolution keywords - user is done
+    resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set", "that's it", "thank you", "thanks"]
+    
+    # If user says issue is resolved, treat as NEW (to end conversation)
+    if any(keyword in message_lower for keyword in resolution_keywords):
+        return True
     
     # If message is ONLY a continuation keyword, it's a continuation
     if message_lower.strip() in continuation_keywords:
@@ -362,17 +375,30 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Handle contact/support requests directly
-        contact_keywords = ['email', 'phone', 'contact', 'support number', 'call', 'reach', 'telephone']
-        if any(keyword in message_lower for keyword in contact_keywords):
-            # Check if they're asking for contact info (not a technical issue)
-            if not any(tech in message_lower for tech in ['error', 'issue', 'problem', 'not working', 'frozen', 'crash']):
-                print(f"[SalesIQ] Contact request detected")
-                return {
-                    "action": "reply",
-                    "replies": ["You can reach Ace Cloud Hosting support at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nHow else can I help you?"],
-                    "session_id": session_id
-                }
+        # Handle contact/support requests directly (but not technical issues mentioning email/phone)
+        contact_request_phrases = ['support email', 'support number', 'contact support', 'phone number', 'email address', 'how to contact', 'reach support']
+        if any(phrase in message_lower for phrase in contact_request_phrases):
+            print(f"[SalesIQ] Contact request detected")
+            return {
+                "action": "reply",
+                "replies": ["You can reach Ace Cloud Hosting support at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nHow else can I help you?"],
+                "session_id": session_id
+            }
+        
+        # Check if user says issue is resolved
+        resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set", "that's it"]
+        if any(keyword in message_lower for keyword in resolution_keywords):
+            print(f"[SalesIQ] Issue resolved by user")
+            # Clear context
+            if session_id in session_contexts:
+                del session_contexts[session_id]
+            if session_id in conversations:
+                del conversations[session_id]
+            return {
+                "action": "reply",
+                "replies": ["Great! I'm glad the issue is resolved. If you need anything else, feel free to ask!"],
+                "session_id": session_id
+            }
         
         # Determine if new issue
         new_issue = is_new_issue(message_text, history)
