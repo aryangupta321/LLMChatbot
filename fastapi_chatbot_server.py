@@ -387,6 +387,24 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
+        # Handle simple acknowledgments (okay, thanks, etc.) - don't trigger new retrieval
+        acknowledgment_keywords = ["okay", "ok", "thanks", "thank you", "got it", "understood", "alright"]
+        if message_lower in acknowledgment_keywords or (len(message_text.split()) <= 2 and any(ack in message_lower for ack in acknowledgment_keywords)):
+            print(f"[SalesIQ] Acknowledgment detected")
+            # If there's no history, just say you're welcome
+            if len(history) == 0:
+                return {
+                    "action": "reply",
+                    "replies": ["You're welcome! Let me know if you need anything else."],
+                    "session_id": session_id
+                }
+            # If there's history, acknowledge and offer help
+            return {
+                "action": "reply",
+                "replies": ["You're welcome! Is there anything else I can help you with?"],
+                "session_id": session_id
+            }
+        
         # Check if user says issue is resolved
         resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set", "that's it"]
         if any(keyword in message_lower for keyword in resolution_keywords):
