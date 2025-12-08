@@ -411,6 +411,18 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
+        # Handle upgrade requests - these require contacting support
+        upgrade_keywords = ["upgrade", "increase disk", "add storage", "more space", "expand disk"]
+        if any(keyword in message_lower for keyword in upgrade_keywords):
+            # Check if they're asking HOW to upgrade (not just asking about options)
+            if any(word in message_lower for word in ["how", "process", "steps", "procedure"]):
+                print(f"[SalesIQ] Upgrade request detected")
+                return {
+                    "action": "reply",
+                    "replies": ["To upgrade your disk space, please contact our support team:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nThey'll help you upgrade to the plan that fits your needs!"],
+                    "session_id": session_id
+                }
+        
         # Determine if new issue
         new_issue = is_new_issue(message_text, history)
         
