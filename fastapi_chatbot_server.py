@@ -92,14 +92,22 @@ class ChatResponse(BaseModel):
 
 def retrieve_context(query: str, top_k: int = 3):
     """
-    Retrieve relevant documents from Pinecone.
-    Prioritizes KB articles over chat transcripts.
+    Retrieve relevant KB articles from Pinecone.
+    Now using KB articles only for cleaner, more predictable responses.
     """
     # Expand short queries for better retrieval
     expanded_query = query
+    query_lower = query.lower()
+    
+    # Only expand if it's a QuickBooks-specific query
     if len(query.split()) <= 4:
-        # Add context words for better matching
-        expanded_query = f"How to {query} in QuickBooks"
+        # Check if query is about QuickBooks
+        qb_keywords = ['quickbooks', 'qb', 'company file', 'lacerte', 'drake', 'proseries']
+        if any(keyword in query_lower for keyword in qb_keywords):
+            expanded_query = f"How to {query} in QuickBooks"
+        else:
+            # For non-QB queries, just add "How to"
+            expanded_query = f"How to {query}"
     
     # Generate query embedding
     response = openai_client.embeddings.create(
@@ -108,49 +116,33 @@ def retrieve_context(query: str, top_k: int = 3):
     )
     query_embedding = response.data[0].embedding
     
-    # First, try to get KB articles
+    # Query Pinecone for KB articles only
     url = f"https://{INDEX_HOST}/query"
-    kb_payload = {
+    payload = {
         "vector": query_embedding,
-        "topK": 5,
+        "topK": top_k,
         "includeMetadata": True,
         "filter": {"source": {"$eq": "kb_article"}}
     }
     
-    kb_response = requests.post(
+    response = requests.post(
         url,
         headers=PINECONE_HEADERS,
-        json=kb_payload,
+        json=payload,
         verify=False
     )
-    kb_response.raise_for_status()
-    kb_results = kb_response.json().get('matches', [])
+    response.raise_for_status()
+    results = response.json().get('matches', [])
     
-    # Filter KB articles with good scores (>0.4)
-    good_kb_articles = [m for m in kb_results if m['score'] > 0.4]
+    # Filter for good matches (>0.4 similarity)
+    good_results = [m for m in results if m['score'] > 0.4]
     
-    # If we have good KB articles, use them
-    if good_kb_articles:
-        print(f"[Context] Using {len(good_kb_articles)} KB articles")
-        return good_kb_articles[:top_k]
+    if good_results:
+        print(f"[Context] Found {len(good_results)} relevant KB articles")
+    else:
+        print(f"[Context] No relevant KB articles found (threshold: 0.4)")
     
-    # Otherwise, fall back to all sources
-    print(f"[Context] No good KB articles found, using all sources")
-    all_payload = {
-        "vector": query_embedding,
-        "topK": top_k,
-        "includeMetadata": True
-    }
-    
-    all_response = requests.post(
-        url,
-        headers=PINECONE_HEADERS,
-        json=all_payload,
-        verify=False
-    )
-    all_response.raise_for_status()
-    
-    return all_response.json().get('matches', [])
+    return good_results
 
 def is_new_issue(message: str, history: List[Dict]) -> bool:
     """Determine if this is a new issue or continuation."""
@@ -159,15 +151,26 @@ def is_new_issue(message: str, history: List[Dict]) -> bool:
     
     message_lower = message.lower()
     
-    # Simple continuation keywords (1-3 words)
-    continuation_keywords = ["yes", "done", "completed", "next", "ok", "okay", "continue"]
-    
     # Resolution keywords - user is done
     resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set", "that's it", "thank you", "thanks"]
     
     # If user says issue is resolved, treat as NEW (to end conversation)
     if any(keyword in message_lower for keyword in resolution_keywords):
         return True
+    
+    # IMPORTANT: Check technical keywords FIRST before continuation keywords
+    # This ensures "quickbooks frozen" is detected as NEW, not continuation
+    technical_keywords = [
+        "quickbooks", "frozen", "error", "issue", "problem", "not working",
+        "disk space", "password", "reset", "server", "lacerte", "drake",
+        "outlook", "email", "printer", "install", "setup", "configure"
+    ]
+    
+    if any(keyword in message_lower for keyword in technical_keywords):
+        return True
+    
+    # Simple continuation keywords (1-3 words)
+    continuation_keywords = ["yes", "done", "completed", "next", "ok", "okay", "continue"]
     
     # If message is ONLY a continuation keyword, it's a continuation
     if message_lower.strip() in continuation_keywords:
@@ -178,16 +181,6 @@ def is_new_issue(message: str, history: List[Dict]) -> bool:
         if any(keyword in message_lower for keyword in continuation_keywords):
             return False
     
-    # If message mentions a specific technical issue/topic, it's a NEW issue
-    technical_keywords = [
-        "quickbooks", "frozen", "error", "issue", "problem", "not working",
-        "disk space", "password", "reset", "server", "lacerte", "drake",
-        "outlook", "email", "printer", "install", "setup", "configure"
-    ]
-    
-    if any(keyword in message_lower for keyword in technical_keywords):
-        return True
-    
     # Long messages (>5 words) are usually new issues
     if len(message.split()) > 5:
         return True
@@ -195,22 +188,13 @@ def is_new_issue(message: str, history: List[Dict]) -> bool:
     return False
 
 def build_context(context_docs: List[Dict]) -> str:
-    """Build context string from retrieved documents, filtering out bad chat transcripts."""
+    """Build context string from retrieved KB articles."""
     context_parts = []
     
     for doc in context_docs:
-        source = doc['metadata']['source']
+        title = doc['metadata'].get('title', 'KB Article')
         text = doc['metadata'].get('text', '')
-        
-        # Skip chat transcripts with placeholders
-        if source == 'chat_transcript' and ('[EMAIL]' in text or '[URL]' in text or '[PHONE]' in text):
-            continue
-        
-        if source == 'kb_article':
-            title = doc['metadata'].get('title', 'KB Article')
-            context_parts.append(f"[KB Article] {title}\n{text}")
-        else:
-            context_parts.append(f"[Support Chat]\n{text}")
+        context_parts.append(f"[KB Article] {title}\n{text}")
     
     return "\n\n---\n\n".join(context_parts)
 
@@ -224,16 +208,20 @@ YOUR JOB: Help users with technical issues and provide information.
 CRITICAL RULES:
 
 FOR PROCEDURAL CONTENT (troubleshooting steps):
-1. Give steps in sequential order: 1-2, then 3-4, then 5, etc.
-2. NEVER skip steps - if user says "done" after steps 1-2, give steps 3-4 next
-3. COPY the exact step text from the KB
-4. After giving 1-2 steps, ask "Have you completed this?"
+1. ONLY use steps that are EXPLICITLY in the knowledge base
+2. Give steps in sequential order: 1-2, then 3-4, then 5, etc.
+3. NEVER skip steps - if user says "done" after steps 1-2, give steps 3-4 next
+4. COPY the exact step text from the KB - DO NOT make up steps
+5. After giving 1-2 steps, ask "Have you completed this?"
+6. If the KB content doesn't match the user's question, say "I don't have specific steps for this. Please contact support."
 
 FOR INFORMATIONAL CONTENT (pricing, plans, features, general info):
 1. Present ALL information at once (don't break into steps)
 2. Use clear formatting (bullet points or numbered list)
 3. Don't ask "Have you completed this?" for informational content
 4. End with "Would you like to know more about any of these?"
+
+CRITICAL: NEVER make up steps. If you don't have the exact steps in the knowledge base, direct users to support.
 
 EXAMPLES:
 
@@ -270,6 +258,9 @@ IMPORTANT:
     elif not context or not context.strip():
         # No good context found
         return "I don't have specific steps for this issue in my knowledge base. Please contact our support team at 1-888-415-5240 or support@acecloudhosting.com for assistance."
+    
+    # Add a safety instruction to prevent hallucination
+    messages.append({"role": "system", "content": "CRITICAL: If the knowledge base content doesn't match the user's question, say 'I don't have specific steps for this issue. Please contact support at 1-888-415-5240.' DO NOT make up steps that aren't in the knowledge base."})
     
     # Add conversation history
     messages.extend(history)
@@ -422,6 +413,16 @@ async def salesiq_webhook(request: dict):
                     "replies": ["To upgrade your disk space, please contact our support team:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nThey'll help you upgrade to the plan that fits your needs!"],
                     "session_id": session_id
                 }
+        
+        # Handle out-of-scope topics (Windows updates, OS issues, etc.)
+        out_of_scope = ["windows update", "windows 11", "operating system", "os update", "system update"]
+        if any(keyword in message_lower for keyword in out_of_scope):
+            print(f"[SalesIQ] Out-of-scope topic detected")
+            return {
+                "action": "reply",
+                "replies": ["For Windows and operating system issues, please contact our support team directly:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nThey can help with OS-level troubleshooting!"],
+                "session_id": session_id
+            }
         
         # Determine if new issue
         new_issue = is_new_issue(message_text, history)
