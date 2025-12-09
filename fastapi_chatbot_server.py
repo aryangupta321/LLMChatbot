@@ -532,7 +532,18 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check if user says issue is resolved
+        # Check if user says issue is NOT resolved (check NEGATIVE first!)
+        not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "doesn't work", "still not", "still frozen", "still stuck", "not solved"]
+        if any(keyword in message_lower for keyword in not_resolved_keywords):
+            print(f"[SalesIQ] Issue NOT resolved - user needs more help")
+            # Offer human agent
+            return {
+                "action": "reply",
+                "replies": ["I understand this is frustrating. Would you like me to connect you with a human agent who can provide personalized assistance? (Reply 'yes' to connect)"],
+                "session_id": session_id
+            }
+        
+        # Check if user says issue IS resolved (only if NOT negative)
         resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set", "that's it"]
         if any(keyword in message_lower for keyword in resolution_keywords):
             print(f"[SalesIQ] Issue resolved by user")
