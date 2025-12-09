@@ -218,13 +218,19 @@ FOR PROCEDURAL CONTENT (troubleshooting steps):
 3. SIMPLIFY the steps - remove unnecessary details, keep only essential actions
 4. Use SHORT sentences - max 10-15 words per sentence
 5. After giving 1-2 steps, ask "Have you completed this?"
-6. If the KB content doesn't match the user's question, say "I don't have specific steps for this. Please contact support."
+6. If the KB content doesn't match the user's question, say "Our support team can assist you better with this. Please contact them at 1-888-415-5240."
 
 FOR INFORMATIONAL CONTENT (pricing, plans, features, general info):
 1. Present ALL information at once (don't break into steps)
 2. Use clear formatting (bullet points or numbered list)
 3. Keep it SHORT and SIMPLE
 4. End with "Would you like to know more?"
+
+HANDLING "NOT WORKING" OR "STUCK":
+If user says steps didn't work, they're stuck, or same issue persists, respond with:
+"I understand this is frustrating. Would you like me to connect you with a human agent who can provide personalized assistance? (Reply 'yes' to connect)"
+
+POSITIVE LANGUAGE: Always use positive, helpful language. Instead of "I don't have" say "Our support team can assist you better".
 
 SIMPLIFICATION EXAMPLES:
 
@@ -268,10 +274,10 @@ IMPORTANT:
         messages.append({"role": "system", "content": context_message})
     elif not context or not context.strip():
         # No good context found
-        return "I don't have specific steps for this issue in my knowledge base. Please contact our support team at 1-888-415-5240 or support@acecloudhosting.com for assistance."
+        return "Our support team can assist you better with this. Please contact them at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"
     
     # Add a safety instruction to prevent hallucination
-    messages.append({"role": "system", "content": "CRITICAL: If the knowledge base content doesn't match the user's question, say 'I don't have specific steps for this issue. Please contact support at 1-888-415-5240.' DO NOT make up steps that aren't in the knowledge base."})
+    messages.append({"role": "system", "content": "CRITICAL: If the knowledge base content doesn't match the user's question, say 'Our support team can assist you better with this. Please contact them at 1-888-415-5240.' DO NOT make up steps that aren't in the knowledge base. Always use positive, helpful language."})
     
     # Add conversation history
     messages.extend(history)
@@ -399,8 +405,17 @@ async def salesiq_webhook(request: dict):
             }
         
         # Handle simple acknowledgments (okay, thanks, etc.) - don't trigger new retrieval
+        # But NOT "okay then" or "ok then" which are continuations
         acknowledgment_keywords = ["okay", "ok", "thanks", "thank you", "got it", "understood", "alright"]
-        if message_lower in acknowledgment_keywords or (len(message_text.split()) <= 2 and any(ack in message_lower for ack in acknowledgment_keywords)):
+        is_acknowledgment = (
+            message_lower in acknowledgment_keywords or 
+            (message_lower in ["okay thanks", "ok thanks", "thank you very much", "thanks a lot"])
+        )
+        # Exclude "okay then", "ok then" which are continuations
+        if 'then' in message_lower:
+            is_acknowledgment = False
+        
+        if is_acknowledgment:
             print(f"[SalesIQ] Acknowledgment detected")
             # If there's no history, just say you're welcome
             if len(history) == 0:
@@ -453,6 +468,28 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
+        # Check if user wants human agent (after trying steps)
+        if len(history) > 0 and ('yes' in message_lower or 'connect' in message_lower):
+            last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
+            if 'connect you with a human agent' in last_bot_message:
+                print(f"[SalesIQ] User requested human agent after trying steps")
+                # Clear context and direct to support
+                if session_id in session_contexts:
+                    del session_contexts[session_id]
+                if session_id in conversations:
+                    del conversations[session_id]
+                return {
+                    "action": "reply",
+                    "replies": ["I'll connect you with a human agent now.\n\nYou can also reach our support team directly:\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"],
+                    "session_id": session_id
+                }
+        
+        # Detect if user is stuck or steps didn't work
+        stuck_keywords = ["not working", "didn't work", "still not", "still frozen", "still stuck", "doesn't work", "not fixed", "same issue", "same problem"]
+        if any(keyword in message_lower for keyword in stuck_keywords):
+            print(f"[SalesIQ] User is stuck, will offer human agent")
+            # Don't clear context yet, let LLM offer human agent option
+        
         # Determine if new issue
         new_issue = is_new_issue(message_text, history)
         
@@ -488,8 +525,13 @@ async def salesiq_webhook(request: dict):
             print(f"[SalesIQ] Context preview: {context[:300]}...")
         response_text = generate_response(message_text, history, context)
         
-        # Clean response - remove markdown and extra line breaks
-        response_text = response_text.replace('**', '').replace('*', '').strip()
+        # Clean response - remove markdown but preserve special characters like %temp%
+        # Only remove markdown bold (**) and bullet points at start of lines
+        response_text = response_text.replace('**', '')
+        # Remove bullet point asterisks only at start of lines, not in middle of text
+        import re
+        response_text = re.sub(r'^\s*\*\s+', '- ', response_text, flags=re.MULTILINE)
+        response_text = response_text.strip()
         
         # Remove excessive line breaks (replace double/triple newlines with single)
         import re
