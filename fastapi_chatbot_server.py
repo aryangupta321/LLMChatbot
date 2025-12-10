@@ -467,15 +467,37 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
+        # CRITICAL: Check for human agent request FIRST (before acknowledgment detection)
+        # If user says "yes", "ok", or "connect" to connect with human agent, handle it immediately
+        if len(history) > 0 and ('yes' in message_lower or 'ok' in message_lower or 'connect' in message_lower):
+            last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
+            if 'connect you with a human agent' in last_bot_message.lower():
+                print(f"[SalesIQ] User requested human agent after trying steps")
+                # Clear context and direct to support
+                if session_id in session_contexts:
+                    del session_contexts[session_id]
+                if session_id in conversations:
+                    del conversations[session_id]
+                return {
+                    "action": "reply",
+                    "replies": ["I'll connect you with a human agent now.\n\nYou can also reach our support team directly:\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"],
+                    "session_id": session_id
+                }
+        
         # Handle simple acknowledgments (okay, thanks, etc.) - don't trigger new retrieval
-        # CRITICAL: Check if we're in the middle of multi-step troubleshooting FIRST
-        # If last bot message asked "Have you completed this?", then "okay" means continuation
+        # CRITICAL: Check if we're in the middle of multi-step troubleshooting or waiting for a response FIRST
+        # If last bot message asked "Have you completed this?" or "Reply 'yes'", then "okay"/"yes" means continuation
         is_in_troubleshooting = False
+        is_awaiting_response = False
         if len(history) > 0:
             last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
             if 'have you completed this?' in last_bot_message.lower() or 'completed this?' in last_bot_message.lower():
                 is_in_troubleshooting = True
                 print(f"[SalesIQ] In multi-step troubleshooting")
+            # Check if bot is waiting for a yes/no response
+            if "reply 'yes'" in last_bot_message.lower() or "reply yes" in last_bot_message.lower():
+                is_awaiting_response = True
+                print(f"[SalesIQ] Awaiting yes/no response")
         
         # Handle acknowledgments - be flexible with natural language and typos
         def is_acknowledgment_message(msg):
@@ -487,8 +509,9 @@ async def salesiq_webhook(request: dict):
                 return False
             
             # Direct acknowledgments (exact matches)
+            # NOTE: Removed "yes" because it can be a response to questions, not just acknowledgment
             direct_acks = ["okay", "ok", "thanks", "thank you", "got it", "understood", "alright", 
-                          "perfect", "good", "great", "awesome", "nice", "cool", "yes"]
+                          "perfect", "good", "great", "awesome", "nice", "cool"]
             if msg in direct_acks:
                 return True
             
@@ -524,9 +547,21 @@ async def salesiq_webhook(request: dict):
             if is_in_troubleshooting and message_lower in ["okay", "ok"]:
                 print(f"[SalesIQ] 'Okay' in troubleshooting, treating as continuation")
                 # Let it fall through to generate_response for next steps
-            # If user says "thanks" or "okay thanks" → acknowledge
+            # If awaiting yes/no response and user says "ok" or "yes" → continuation (not acknowledgment)
+            elif is_awaiting_response and message_lower in ["ok", "okay", "yes"]:
+                print(f"[SalesIQ] Response to yes/no question, treating as continuation")
+                # Let it fall through to generate_response
+            # If user says "ok" or "okay" alone (without thanks) → ask if they need more help
+            elif message_lower in ["ok", "okay"]:
+                print(f"[SalesIQ] 'Ok/Okay' alone, asking if need more help")
+                return {
+                    "action": "reply",
+                    "replies": ["Is there anything else I can help you with?"],
+                    "session_id": session_id
+                }
+            # If user says "thanks" or "okay thanks" → acknowledge with "you're welcome"
             else:
-                print(f"[SalesIQ] Acknowledgment detected")
+                print(f"[SalesIQ] Acknowledgment with thanks detected")
                 # If there's no history, just say you're welcome
                 if len(history) == 0:
                     return {
@@ -557,6 +592,17 @@ async def salesiq_webhook(request: dict):
             return {
                 "action": "reply",
                 "replies": ["Sure! Take your time and let me know if you need any help or have questions."],
+                "session_id": session_id
+            }
+        
+        # Check for agent connection requests
+        agent_request_phrases = ["connect me to agent", "connect to agent", "human agent", "talk to human", 
+                               "speak to agent", "transfer to agent", "escalate", "need help from human"]
+        if any(phrase in message_lower for phrase in agent_request_phrases):
+            print(f"[SalesIQ] User requesting human agent")
+            return {
+                "action": "reply",
+                "replies": ["I understand this is frustrating. Would you like me to connect you with a human agent who can provide personalized assistance? (Reply 'yes' to connect)"],
                 "session_id": session_id
             }
         
@@ -618,21 +664,7 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check if user wants human agent (after trying steps)
-        if len(history) > 0 and ('yes' in message_lower or 'connect' in message_lower):
-            last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
-            if 'connect you with a human agent' in last_bot_message:
-                print(f"[SalesIQ] User requested human agent after trying steps")
-                # Clear context and direct to support
-                if session_id in session_contexts:
-                    del session_contexts[session_id]
-                if session_id in conversations:
-                    del conversations[session_id]
-                return {
-                    "action": "reply",
-                    "replies": ["I'll connect you with a human agent now.\n\nYou can also reach our support team directly:\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"],
-                    "session_id": session_id
-                }
+
         
         # Detect if user is stuck or steps didn't work
         # IMPORTANT: Only detect "stuck" when user says steps DIDN'T WORK
