@@ -235,11 +235,13 @@ CRITICAL RULES:
 
 FOR PROCEDURAL CONTENT (troubleshooting steps):
 1. ONLY use steps that are EXPLICITLY in the knowledge base
-2. Give steps in sequential order: 1-2, then 3-4, then 5, etc.
+2. Give ONLY 1 step at a time for simplicity
 3. SIMPLIFY the steps - remove unnecessary details, keep only essential actions
 4. Use SHORT sentences - max 10-15 words per sentence
-5. After giving 1-2 steps, ask "Have you completed this?"
+5. After giving 1 step, ask "Have you completed this?"
 6. If the KB content doesn't match the user's question, say "Our support team can assist you better with this. Please contact them at 1-888-415-5240."
+
+CRITICAL: Always give only ONE step per response to keep it simple and easy to follow.
 
 FOR INFORMATIONAL CONTENT (pricing, plans, features, general info):
 1. Present ALL information at once (don't break into steps)
@@ -326,10 +328,11 @@ If no relevant KB article is found, offer to connect them with support at 1-888-
 {context}
 
 IMPORTANT: 
-- If this is PROCEDURAL (troubleshooting steps), give steps 1-2 first, then wait for confirmation
+- If this is PROCEDURAL (troubleshooting steps), give ONLY 1 step first, then wait for confirmation
 - If this is INFORMATIONAL (pricing, plans, features), present ALL information at once
-- For procedural: Ask "Have you completed this?" after each set of steps
+- For procedural: Ask "Have you completed this?" after giving 1 step
 - For informational: Ask "Would you like to know more?" at the end
+- Keep it simple - only 1 step per response for easy following
 - Copy the exact text, do not paraphrase"""
         messages.append({"role": "system", "content": context_message})
     elif not context or not context.strip():
