@@ -1,1 +1,1 @@
-web: python fastapi_chatbot_server.py
+web: python fastapi_chatbot_hybrid.py
