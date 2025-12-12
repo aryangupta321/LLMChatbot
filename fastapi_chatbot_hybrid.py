@@ -112,8 +112,12 @@ You: "Let's check that! Do you have a dedicated server or shared server?"
 [STOP HERE - wait for answer, then provide steps]
 
 User: "Disk full"
+You: "I can help! First, let's clear temporary files to free up space. Press Win+R and type '%temp%'. Let me know when you're there!"
+[STOP HERE - guide through temp file clearing]
+
+User: "Disk space low"
 You: "I can help! Are you on a dedicated or shared server?"
-[STOP HERE - don't assume server type]
+[STOP HERE - wait for answer, then provide steps]
 
 User: "QuickBooks says application requires update"
 You: "Application updates need to be handled by our support team to avoid downtime. Please contact support at 1-888-415-5240 or support@acecloudhosting.com and they'll schedule the update for you!"
@@ -140,11 +144,19 @@ You: "Let's resolve that! First, try closing it from Task Manager. Can you do th
 [STOP HERE - then guide through AppData fix if needed]
 
 User: "I need to reset my password"
-You: "I can help with that! Are you trying to reset your server/user account password or your SelfCare portal password?"
-[STOP HERE - wait for clarification, don't assume]
+You: "I can help with that! Are you registered on the SelfCare portal?"
+[STOP HERE - wait for answer]
+
+User: "Yes, I'm registered"
+You: "Great! Visit https://selfcare.acecloudhosting.com and click 'Forgot your password'. Let me know when you're there!"
+[STOP HERE - then guide through reset steps]
+
+User: "No, I'm not registered"
+You: "No problem! For server/user account password reset, please contact our support team at 1-888-415-5240. They'll help you right away!"
+[STOP HERE - escalate to support]
 
 User: "Password reset"
-You: "I can help! Are you trying to reset your server/user account password or your SelfCare portal password?"
+You: "I can help! Are you registered on the SelfCare portal?"
 [STOP HERE - wait for clarification]
 
 HANDOVER SCENARIOS (Escalate to human support):
@@ -268,6 +280,17 @@ Step 3: Click on "This PC" or "My Computer"
 Step 4: Right-click on C drive, select Properties
 Step 5: Check Used space, Free space, and Capacity
 Note: Need at least 10% free space for optimal performance
+Support: 1-888-415-5240
+
+**Clear Disk Space (Temp Files):**
+If disk space is low, clear temporary files:
+Step 1: Press Win+R to open Run dialog
+Step 2: Type "%temp%" and press Enter (or type "temp" for same folder)
+Step 3: Select all files (Ctrl+A)
+Step 4: Delete files (Delete key)
+Step 5: Empty Recycle Bin
+Step 6: Check disk space again (should have freed up space)
+Note: This clears temporary files and can free up 1-5 GB of space
 Support: 1-888-415-5240
 
 **Printer Redirection:**
@@ -862,6 +885,48 @@ Which option works best for you?"""
                 "session_id": session_id
             }
         
+        # Check for password reset - improved flow
+        password_keywords = ["password", "reset", "forgot", "locked out"]
+        if any(keyword in message_lower for keyword in password_keywords):
+            logger.info(f"[SalesIQ] Password reset detected")
+            # Check if user already answered about SelfCare registration
+            if len(history) > 0:
+                last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
+                # If bot already asked about SelfCare registration
+                if 'registered on the selfcare portal' in last_bot_message.lower():
+                    # User is responding to that question
+                    if 'yes' in message_lower or 'registered' in message_lower:
+                        logger.info(f"[SalesIQ] User is registered on SelfCare")
+                        response_text = "Great! Visit https://selfcare.acecloudhosting.com and click 'Forgot your password'. Let me know when you're there!"
+                        conversations[session_id].append({"role": "user", "content": message_text})
+                        conversations[session_id].append({"role": "assistant", "content": response_text})
+                        return {
+                            "action": "reply",
+                            "replies": [response_text],
+                            "session_id": session_id
+                        }
+                    elif 'no' in message_lower or 'not registered' in message_lower:
+                        logger.info(f"[SalesIQ] User is NOT registered on SelfCare")
+                        response_text = "No problem! For server/user account password reset, please contact our support team at 1-888-415-5240. They'll help you right away!"
+                        conversations[session_id].append({"role": "user", "content": message_text})
+                        conversations[session_id].append({"role": "assistant", "content": response_text})
+                        return {
+                            "action": "reply",
+                            "replies": [response_text],
+                            "session_id": session_id
+                        }
+            else:
+                # First time asking about password reset
+                logger.info(f"[SalesIQ] First password reset question - asking about SelfCare registration")
+                response_text = "I can help! Are you registered on the SelfCare portal?"
+                conversations[session_id].append({"role": "user", "content": message_text})
+                conversations[session_id].append({"role": "assistant", "content": response_text})
+                return {
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+        
         # Check for application updates
         app_update_keywords = ["update", "upgrade", "requires update", "needs update"]
         app_names = ["quickbooks", "lacerte", "drake", "proseries", "qb"]
@@ -1004,39 +1069,51 @@ Which option works best for you?"""
                 "session_id": session_id
             }
         
-        # Check for acknowledgments
+        # Check for acknowledgments - BUT NOT during step-by-step troubleshooting
         def is_acknowledgment_message(msg):
             msg = msg.lower().strip()
+            # If message contains "then", it's likely a continuation, not an acknowledgment
             if 'then' in msg:
                 return False
-            direct_acks = ["okay", "ok", "thanks", "thank you", "got it", "understood", "alright", 
-                          "perfect", "good", "great", "awesome", "nice", "cool"]
+            # Only treat EXACT matches as acknowledgments (not partial)
+            direct_acks = ["okay", "ok", "thanks", "thank you", "got it", "understood", "alright"]
             if msg in direct_acks:
                 return True
+            # Thanks patterns
             thanks_patterns = ["thank", "thnk", "thx", "ty"]
-            if any(pattern in msg for pattern in thanks_patterns):
-                return True
-            positive_expressions = ["i m good", "i'm good", "all good", "looks good", "working now", 
-                                  "that's it", "perfect", "excellent", "brilliant", "fantastic"]
-            if any(expr in msg for expr in positive_expressions):
-                return True
-            if msg.startswith("no") and any(pattern in msg for pattern in thanks_patterns):
+            if any(pattern in msg for pattern in thanks_patterns) and len(msg) < 20:
                 return True
             return False
         
+        # Check if we're in the middle of step-by-step troubleshooting
         is_in_troubleshooting = False
         if len(history) > 0:
             last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
-            if 'have you completed this?' in last_bot_message.lower():
+            # Check for step-by-step guidance patterns
+            troubleshooting_patterns = [
+                'step',
+                'can you',
+                'do that',
+                'let me know when',
+                'can you see',
+                'do you see',
+                'click',
+                'right-click',
+                'press',
+                'open',
+                'navigate',
+                'select',
+                'find',
+                'go to'
+            ]
+            if any(pattern in last_bot_message.lower() for pattern in troubleshooting_patterns):
                 is_in_troubleshooting = True
         
         is_acknowledgment = is_acknowledgment_message(message_lower)
         
-        if is_acknowledgment:
-            if is_in_troubleshooting and message_lower in ["okay", "ok"]:
-                logger.info(f"[SalesIQ] 'Okay' in troubleshooting, treating as continuation")
-                # Fall through to LLM
-            elif message_lower in ["ok", "okay"]:
+        if is_acknowledgment and not is_in_troubleshooting:
+            logger.info(f"[SalesIQ] Acknowledgment detected (not in troubleshooting)")
+            if message_lower in ["ok", "okay"]:
                 logger.info(f"[SalesIQ] 'Ok/Okay' alone, asking if need more help")
                 return {
                     "action": "reply",
@@ -1050,6 +1127,9 @@ Which option works best for you?"""
                     "replies": ["You're welcome! Is there anything else I can help you with?"],
                     "session_id": session_id
                 }
+        elif is_acknowledgment and is_in_troubleshooting:
+            logger.info(f"[SalesIQ] Acknowledgment during troubleshooting - continuing with LLM")
+            # Fall through to LLM to continue with next step
         
         # Generate LLM response with embedded resolution steps
         logger.info(f"[SalesIQ] Calling OpenAI LLM with embedded resolution steps...")
