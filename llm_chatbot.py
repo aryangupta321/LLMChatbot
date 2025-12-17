@@ -1,8 +1,3 @@
-"""
-FastAPI Chatbot Server - Hybrid LLM Approach
-Uses resolution steps in system prompt (no RAG layer)
-LLM intelligently selects and presents steps based on context
-"""
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -857,6 +852,11 @@ async def salesiq_webhook(request: dict):
             response_text = "Great! I'm glad the issue is resolved. If you need anything else, feel free to ask!"
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
+            
+            # Close chat in SalesIQ since issue is resolved
+            close_result = salesiq_api.close_chat(session_id, "resolved")
+            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            
             if session_id in conversations:
                 del conversations[session_id]
             return {
@@ -1003,6 +1003,10 @@ Thank you for contacting Ace Cloud Hosting!"""
             )
             logger.info(f"[Desk] Callback ticket result: {api_result}")
             
+            # Close chat in SalesIQ
+            close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            
             # Clear conversation after callback (auto-close)
             if session_id in conversations:
                 del conversations[session_id]
@@ -1040,6 +1044,10 @@ Thank you for contacting Ace Cloud Hosting!"""
                 conversation_history="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
             )
             logger.info(f"[Desk] Support ticket result: {api_result}")
+            
+            # Close chat in SalesIQ
+            close_result = salesiq_api.close_chat(session_id, "ticket_created")
+            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
             
             # Clear conversation after ticket creation (auto-close)
             if session_id in conversations:

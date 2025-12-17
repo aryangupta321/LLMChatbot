@@ -15,13 +15,16 @@ class ZohoSalesIQAPI:
     """Zoho SalesIQ API Integration for chat transfers"""
     
     def __init__(self):
-        self.api_key = os.getenv("SALESIQ_API_KEY")
+        self.access_token = os.getenv("SALESIQ_ACCESS_TOKEN")
         self.department_id = os.getenv("SALESIQ_DEPARTMENT_ID")
-        self.base_url = "https://salesiq.zoho.com/api/v2"
-        self.enabled = bool(self.api_key and self.department_id)
+        # Use Indian API domain as provided by your manager
+        self.base_url = "https://salesiq.zoho.in/api/v2"
+        self.enabled = bool(self.access_token)
         
         if not self.enabled:
             logger.warning("SalesIQ API not configured - transfers will be simulated")
+        else:
+            logger.info("SalesIQ API configured with Indian domain")
     
     def create_chat_session(self, visitor_id: str, conversation_history: str) -> Dict:
         """Create new chat session and transfer to agent"""
@@ -35,7 +38,7 @@ class ZohoSalesIQAPI:
             }
         
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
         }
         
@@ -80,19 +83,81 @@ class ZohoSalesIQAPI:
                 "success": False,
                 "error": str(e)
             }
+    
+    def close_chat(self, session_id: str, reason: str = "resolved") -> Dict:
+        """Close chat session in SalesIQ"""
+        
+        if not self.enabled:
+            logger.info(f"SalesIQ API disabled - simulating chat closure for session {session_id}")
+            return {
+                "success": True,
+                "simulated": True,
+                "message": f"Chat {session_id} closed (simulated)"
+            }
+        
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "status": "closed",
+            "reason": reason,
+            "closed_by": "bot"
+        }
+        
+        try:
+            logger.info(f"Closing SalesIQ chat session {session_id}")
+            response = requests.patch(
+                f"{self.base_url}/chats/{session_id}",
+                json=payload,
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code in [200, 204]:
+                logger.info(f"SalesIQ chat {session_id} closed successfully")
+                return {
+                    "success": True,
+                    "message": f"Chat {session_id} closed"
+                }
+            else:
+                logger.error(f"SalesIQ close chat error: {response.status_code} - {response.text}")
+                return {
+                    "success": False,
+                    "error": f"API Error: {response.status_code}",
+                    "details": response.text
+                }
+        except requests.exceptions.Timeout:
+            logger.error("SalesIQ API timeout during chat closure")
+            return {
+                "success": False,
+                "error": "API timeout"
+            }
+        except Exception as e:
+            logger.error(f"SalesIQ close chat error: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
 
 class ZohoDeskAPI:
     """Zoho Desk API Integration for ticket creation"""
     
     def __init__(self):
-        self.oauth_token = os.getenv("DESK_OAUTH_TOKEN")
+        # Use the same access token from SalesIQ (it has Desk.tickets.ALL scope)
+        self.access_token = os.getenv("SALESIQ_ACCESS_TOKEN")
         self.org_id = os.getenv("DESK_ORGANIZATION_ID")
-        self.base_url = "https://desk.zoho.com/api/v1"
-        self.enabled = bool(self.oauth_token and self.org_id)
+        # Use Indian API domain to match SalesIQ
+        self.base_url = "https://desk.zoho.in/api/v1"
+        # Disable Desk API for now - testing SalesIQ first
+        self.enabled = False  # bool(self.access_token and self.org_id)
         
         if not self.enabled:
-            logger.warning("Desk API not configured - ticket creation will be simulated")
+            logger.warning("Desk API disabled for testing - ticket creation will be simulated")
+        else:
+            logger.info("Desk API configured with Indian domain")
     
     def create_callback_ticket(self, 
                               user_email: str,
@@ -111,7 +176,7 @@ class ZohoDeskAPI:
             }
         
         headers = {
-            "Authorization": f"Zoho-oauthtoken {self.oauth_token}",
+            "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
         }
         
@@ -186,7 +251,7 @@ class ZohoDeskAPI:
             }
         
         headers = {
-            "Authorization": f"Zoho-oauthtoken {self.oauth_token}",
+            "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json"
         }
         
