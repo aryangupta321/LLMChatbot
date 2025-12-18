@@ -30,16 +30,16 @@ class ZohoSalesIQAPI:
             self.app_id = os.getenv("SALESIQ_APP_ID", "").strip()
             self.screen_name = os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal").strip()
             
-            # Use Operator API instead of Visitor API (token has operator scopes)
-            self.base_url = "https://salesiq.zoho.in/api/v2"
+            # Use Visitor API for external bot integration
+            self.base_url = f"https://salesiq.zoho.in/api/visitor/v1/{self.screen_name}"
             
-            # Enable only if we have minimum required config
-            self.enabled = bool(self.access_token and self.department_id)
+            # Enable only if we have all required config
+            self.enabled = bool(self.access_token and self.department_id and self.app_id)
             
             if not self.enabled:
-                logger.warning("SalesIQ API not configured - missing token or department_id")
+                logger.warning(f"SalesIQ API not configured - token: {bool(self.access_token)}, department: {bool(self.department_id)}, app_id: {bool(self.app_id)}")
             else:
-                logger.info(f"SalesIQ API configured - department: {self.department_id}")
+                logger.info(f"SalesIQ API configured - department: {self.department_id}, app_id: {self.app_id}")
                 
         except Exception as e:
             logger.error(f"Error initializing SalesIQ API: {str(e)}")
@@ -61,33 +61,55 @@ class ZohoSalesIQAPI:
             "Content-Type": "application/json"
         }
         
-        # Use Operator API payload structure (token has operator scopes)
+        # Use correct Visitor API payload structure per official documentation
         payload = {
-            "visitor_id": visitor_id,
-            "department_id": self.department_id,
-            "conversation_history": conversation_history,
-            "message": "User requesting chat transfer"
+            "visitor": {
+                "user_id": visitor_id,
+                "name": "Chat User",
+                "email": "support@acecloudhosting.com",
+                "platform": "WebBot",
+                "current_page": "https://acecloudhosting.com/support",
+                "page_title": "Support Chat"
+            },
+            "app_id": self.app_id,
+            "question": conversation_history,
+            "department_id": self.department_id
         }
         
-        logger.info(f"SalesIQ Operator API payload: visitor_id={visitor_id}, department_id={self.department_id}")
+        logger.info(f"SalesIQ Visitor API request: visitor_id={visitor_id}, department_id={self.department_id}, app_id={self.app_id}")
+        
+        # Use the correct Visitor API endpoint
+        endpoint = f"{self.base_url}/conversations"
         
         try:
-            logger.info(f"Creating SalesIQ chat session for visitor {visitor_id}")
+            logger.info(f"Calling SalesIQ Visitor API: {endpoint}")
             response = requests.post(
-                f"{self.base_url}/chats",  # Operator API endpoint
+                endpoint,
                 json=payload,
                 headers=headers,
                 timeout=10
             )
             
+            logger.info(f"SalesIQ API Response - Status: {response.status_code}")
+            logger.info(f"SalesIQ API Response - Body: {response.text}")
+            
             if response.status_code in [200, 201]:
-                logger.info(f"SalesIQ conversation created successfully")
-                return {
-                    "success": True,
-                    "data": response.json()
-                }
+                logger.info(f"✅ SalesIQ chat transfer successful for visitor {visitor_id}")
+                try:
+                    response_data = response.json()
+                    return {
+                        "success": True,
+                        "data": response_data,
+                        "endpoint_used": endpoint
+                    }
+                except:
+                    return {
+                        "success": True,
+                        "message": "Chat transfer initiated",
+                        "endpoint_used": endpoint
+                    }
             else:
-                logger.error(f"SalesIQ API error: {response.status_code} - {response.text}")
+                logger.error(f"❌ SalesIQ API failed: {response.status_code} - {response.text}")
                 return {
                     "success": False,
                     "error": f"API Error: {response.status_code}",

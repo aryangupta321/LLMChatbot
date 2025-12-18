@@ -55,14 +55,18 @@ class FallbackAPI:
         logger.info("[API] Fallback: Simulating support ticket creation")
         return {"success": True, "simulated": True, "ticket_number": "TK-SIM-001"}
 
-# Load simple Zoho API integration
+# Load Zoho API integration with proper error handling
 try:
     from zoho_api_simple import ZohoSalesIQAPI, ZohoDeskAPI
     salesiq_api = ZohoSalesIQAPI()
     desk_api = ZohoDeskAPI()
-    logger.info(f"Simple Zoho API loaded - SalesIQ enabled: {salesiq_api.enabled}")
+    logger.info(f"Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
+except ImportError as e:
+    logger.error(f"Failed to import Zoho API module: {str(e)} - using fallback")
+    salesiq_api = FallbackAPI()
+    desk_api = FallbackAPI()
 except Exception as e:
-    logger.error(f"Failed to load Zoho API: {str(e)} - using fallback")
+    logger.error(f"Failed to initialize Zoho API: {str(e)} - using fallback")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
 
@@ -747,6 +751,10 @@ async def root():
         "status": "online",
         "service": "Ace Cloud Hosting Support Bot - Hybrid LLM",
         "version": "2.0.0",
+        "api_status": {
+            "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
+            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False
+        },
         "endpoints": {
             "salesiq_webhook": "/webhook/salesiq",
             "chat": "/chat",
@@ -760,10 +768,24 @@ async def health():
     """Health check for monitoring"""
     return {
         "status": "healthy",
-        "mode": "simulation",
+        "mode": "production",
         "openai": "connected",
         "active_sessions": len(conversations),
+        "api_status": {
+            "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
+            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False
+        }
         "webhook_url": "https://web-production-3032d.up.railway.app/webhook/salesiq"
+    }
+
+@app.get("/webhook/salesiq")
+async def salesiq_webhook_test():
+    """Test endpoint for SalesIQ webhook - GET request"""
+    return {
+        "status": "webhook_ready",
+        "message": "SalesIQ webhook endpoint is accessible",
+        "method": "GET",
+        "note": "POST requests will be processed as chat messages"
     }
 
 @app.post("/webhook/salesiq")
@@ -772,6 +794,17 @@ async def salesiq_webhook(request: dict):
     session_id = None
     try:
         logger.info(f"[SalesIQ] Webhook received")
+        
+        # Validate request structure
+        if not isinstance(request, dict):
+            logger.error(f"[SalesIQ] Invalid request format: {type(request)}")
+            return {
+                "action": "reply",
+                "replies": ["I'm having technical difficulties. Please call 1-888-415-5240."],
+                "session_id": "unknown"
+            }
+        
+        logger.info(f"[SalesIQ] Request keys: {list(request.keys())}")
         logger.info(f"[SalesIQ] Full request payload: {request}")
         
         # Log all possible IDs for transfer debugging
