@@ -849,19 +849,16 @@ async def salesiq_webhook(request: dict):
                 api_result = salesiq_api.create_chat_session(session_id, conversation_text)
                 logger.info(f"[SalesIQ] API result: {api_result}")
                 
-                response = {
-                    "action": "transfer",
-                    "transfer_to": "human_agent",
-                    "session_id": session_id,
-                    "conversation_history": conversation_text,
-                    "replies": ["Connecting you with a support agent..."]
-                }
-                
+                # SalesIQ only supports "action": "reply" - transfer happens via API
                 # Clear conversation after transfer
                 if session_id in conversations:
                     del conversations[session_id]
                 
-                return response
+                return {
+                    "action": "reply",
+                    "replies": ["Connecting you with a support agent. Please wait while I transfer this chat..."],
+                    "session_id": session_id
+                }
         
         # Check for issue resolution
         resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set"]
