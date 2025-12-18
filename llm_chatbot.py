@@ -772,12 +772,22 @@ async def salesiq_webhook(request: dict):
     session_id = None
     try:
         logger.info(f"[SalesIQ] Webhook received")
-        logger.debug(f"[SalesIQ] Request payload: {request}")
+        logger.info(f"[SalesIQ] Full request payload: {request}")
         
-        # Extract session ID
+        # Log all possible IDs for transfer debugging
         visitor = request.get('visitor', {})
+        chat = request.get('chat', {})
+        conversation = request.get('conversation', {})
+        
+        logger.info(f"[SalesIQ] Visitor data: {visitor}")
+        logger.info(f"[SalesIQ] Chat data: {chat}")
+        logger.info(f"[SalesIQ] Conversation data: {conversation}")
+        
+        # Extract session ID (try multiple sources)
         session_id = (
-            visitor.get('active_conversation_id') or 
+            visitor.get('active_conversation_id') or
+            chat.get('id') or
+            conversation.get('id') or
             request.get('session_id') or 
             visitor.get('id') or
             'unknown'
@@ -862,7 +872,7 @@ async def salesiq_webhook(request: dict):
                 
                 return {
                     "action": "reply",
-                    "replies": ["Connecting you with a support agent. Please wait while I transfer this chat..."],
+                    "replies": ["I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."],
                     "session_id": session_id
                 }
         
@@ -988,7 +998,7 @@ Which option works best for you?"""
             # SalesIQ webhooks only support "reply" action, not "transfer"
             # The transfer happens through the SalesIQ API call above
             # Send confirmation message to user
-            response_text = "Connecting you with a support agent. Please wait..."
+            response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
             
             # Clear conversation after transfer
             if session_id in conversations:
