@@ -1,1 +1,1 @@
-web: python fastapi_chatbot_hybrid.py
+web: python llm_chatbot.py
