@@ -1034,9 +1034,20 @@ async def salesiq_webhook(request: dict):
                     role = "User" if msg.get('role') == 'user' else "Bot"
                     conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
-                # Call SalesIQ API to create chat session
-                logger.info(f"[SalesIQ] Calling create_chat_session API...")
-                api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+                # Prepare overrides from webhook payload
+                req_meta = request.get('request', {}) if isinstance(request, dict) else {}
+                override_app_id = req_meta.get('app_id') or getattr(salesiq_api, 'app_id', None)
+                override_department_id = visitor.get('department_id') if isinstance(visitor, dict) else None
+                
+                # Call SalesIQ API (Visitor API) to create conversation and route to agent
+                logger.info(f"[SalesIQ] Calling create_chat_session API with overrides app_id={override_app_id}, dept={override_department_id}")
+                api_result = salesiq_api.create_chat_session(
+                    session_id,
+                    conversation_text,
+                    app_id=override_app_id,
+                    department_id=str(override_department_id) if override_department_id else None,
+                    visitor_info=visitor
+                )
                 logger.info(f"[SalesIQ] API result: {api_result}")
             except Exception as api_error:
                 logger.error(f"[SalesIQ] API call failed: {str(api_error)}")
@@ -1303,6 +1314,57 @@ async def list_sessions():
         "active_sessions": len(conversations),
         "sessions": list(conversations.keys())
     }
+
+# -----------------------------------------------------------
+# Test endpoints to validate SalesIQ Visitor API transfer
+# -----------------------------------------------------------
+@app.get("/test/salesiq-transfer")
+async def test_salesiq_transfer_get():
+    """Quick GET test to exercise Visitor API with env defaults"""
+    try:
+        session_id = f"test_{int(datetime.now().timestamp())}"
+        conversation_text = "Test transfer from GET endpoint"
+        logger.info(f"[Test] Initiating SalesIQ transfer (GET) for session {session_id}")
+        result = salesiq_api.create_chat_session(session_id, conversation_text)
+        return {
+            "session_id": session_id,
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"[Test] SalesIQ transfer GET failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/test/salesiq-transfer")
+async def test_salesiq_transfer_post(payload: Dict):
+    """POST test to exercise Visitor API with overrides from payload.
+    Accepts: session_id, conversation, app_id, department_id, visitor, custom_wait_time
+    """
+    try:
+        session_id = str(payload.get("session_id") or f"test_{int(datetime.now().timestamp())}")
+        conversation_text = str(payload.get("conversation") or "Test transfer from POST endpoint")
+        app_id = payload.get("app_id")
+        department_id = payload.get("department_id")
+        visitor_info = payload.get("visitor")
+        custom_wait_time = payload.get("custom_wait_time")
+
+        logger.info(
+            f"[Test] Initiating SalesIQ transfer (POST) for session {session_id} with app_id={app_id}, dept={department_id}"
+        )
+        result = salesiq_api.create_chat_session(
+            session_id,
+            conversation_text,
+            app_id=app_id,
+            department_id=str(department_id) if department_id is not None else None,
+            visitor_info=visitor_info,
+            custom_wait_time=custom_wait_time,
+        )
+        return {
+            "session_id": session_id,
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"[Test] SalesIQ transfer POST failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
