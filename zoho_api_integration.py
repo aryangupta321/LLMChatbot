@@ -18,15 +18,17 @@ class ZohoSalesIQAPI:
         try:
             self.access_token = os.getenv("SALESIQ_ACCESS_TOKEN")
             self.department_id = os.getenv("SALESIQ_DEPARTMENT_ID")
-            # Use Indian API domain with portal-specific endpoint
-            self.base_url = "https://salesiq.zoho.in/api/v2"
-            # Alternative portal-specific URL if needed: https://salesiq.zoho.in/rtdsportal/api/v2
-            self.enabled = bool(self.access_token)
+            self.app_id = os.getenv("SALESIQ_APP_ID")  # Need this for visitor API
+            self.screen_name = os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal")  # From your URL
+            
+            # Use official Visitor API endpoint from documentation
+            self.base_url = f"https://salesiq.zoho.in/api/visitor/v1/{self.screen_name}"
+            self.enabled = bool(self.access_token and self.department_id)
             
             if not self.enabled:
                 logger.warning("SalesIQ API not configured - transfers will be simulated")
             else:
-                logger.info(f"SalesIQ API configured with Indian domain, department: {self.department_id}")
+                logger.info(f"SalesIQ Visitor API configured - screen: {self.screen_name}, department: {self.department_id}")
                 # Validate token format
                 if self.access_token and not self.access_token.startswith("1000."):
                     logger.warning("SalesIQ token format may be incorrect")
@@ -37,7 +39,7 @@ class ZohoSalesIQAPI:
             self.department_id = None
     
     def create_chat_session(self, visitor_id: str, conversation_history: str) -> Dict:
-        """Create new chat session and transfer to agent"""
+        """Create new conversation using official SalesIQ Visitor API"""
         
         if not self.enabled:
             logger.info(f"SalesIQ API disabled - simulating transfer for visitor {visitor_id}")
@@ -52,26 +54,34 @@ class ZohoSalesIQAPI:
             "Content-Type": "application/json"
         }
         
+        # Official Visitor API payload structure from documentation
         payload = {
-            "visitor_id": visitor_id,
-            "department_id": self.department_id,
-            "conversation_history": conversation_history,
-            "transfer_to": "human_agent"
+            "visitor": {
+                "user_id": visitor_id,
+                "name": "Chat User",
+                "email": "support@acecloudhosting.com",
+                "platform": "WebBot",
+                "current_page": "https://acecloudhosting.com/support",
+                "page_title": "Support Chat"
+            },
+            "app_id": self.app_id or "default_app_id",
+            "question": conversation_history,
+            "department_id": self.department_id
         }
         
-        logger.info(f"SalesIQ payload: visitor_id={visitor_id}, department_id={self.department_id}")
+        logger.info(f"SalesIQ Visitor API payload: user_id={visitor_id}, department_id={self.department_id}")
         
         try:
-            logger.info(f"Creating SalesIQ chat session for visitor {visitor_id}")
+            logger.info(f"Creating SalesIQ conversation for visitor {visitor_id}")
             response = requests.post(
-                f"{self.base_url}/chats",
+                f"{self.base_url}/conversations",  # Official endpoint from docs
                 json=payload,
                 headers=headers,
                 timeout=10
             )
             
             if response.status_code in [200, 201]:
-                logger.info(f"SalesIQ chat session created successfully")
+                logger.info(f"SalesIQ conversation created successfully")
                 return {
                     "success": True,
                     "data": response.json()
