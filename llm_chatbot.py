@@ -38,27 +38,33 @@ LLM_MODEL = "gpt-4o-mini"
 
 conversations: Dict[str, List[Dict]] = {}
 
-# Simple API simulation - no external dependencies
-class SimpleAPI:
+# Fallback API class for when real API is not available
+class FallbackAPI:
     def __init__(self):
         self.enabled = False
     def create_chat_session(self, visitor_id, conversation_history):
-        logger.info(f"[API] Simulating chat transfer for {visitor_id}")
+        logger.info(f"[API] Fallback: Simulating chat transfer for {visitor_id}")
         return {"success": True, "simulated": True, "message": "Chat transfer simulated"}
     def close_chat(self, session_id, reason="resolved"):
-        logger.info(f"[API] Simulating chat closure for {session_id}")
+        logger.info(f"[API] Fallback: Simulating chat closure for {session_id}")
         return {"success": True, "simulated": True, "message": "Chat closure simulated"}
     def create_callback_ticket(self, *args, **kwargs):
-        logger.info("[API] Simulating callback ticket creation")
+        logger.info("[API] Fallback: Simulating callback ticket creation")
         return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
     def create_support_ticket(self, *args, **kwargs):
-        logger.info("[API] Simulating support ticket creation")
+        logger.info("[API] Fallback: Simulating support ticket creation")
         return {"success": True, "simulated": True, "ticket_number": "TK-SIM-001"}
 
-# Use simple simulation - no external API calls
-salesiq_api = SimpleAPI()
-desk_api = SimpleAPI()
-logger.info("Bot initialized with simulation mode - no external API dependencies")
+# Try to load real Zoho API integration
+try:
+    from zoho_api_integration import ZohoSalesIQAPI, ZohoDeskAPI
+    salesiq_api = ZohoSalesIQAPI()
+    desk_api = ZohoDeskAPI()
+    logger.info(f"Zoho API loaded - SalesIQ enabled: {salesiq_api.enabled}, Desk enabled: {desk_api.enabled}")
+except Exception as e:
+    logger.error(f"Failed to load Zoho API: {str(e)} - using fallback")
+    salesiq_api = FallbackAPI()
+    desk_api = FallbackAPI()
 
 class Message(BaseModel):
     role: str
