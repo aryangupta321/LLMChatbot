@@ -1071,35 +1071,39 @@ async def salesiq_webhook(request: dict):
         # Check for option selections - SCHEDULE CALLBACK
         if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
             logger.info(f"[SalesIQ] User selected: Schedule Callback")
-            response_text = """Perfect! I'm creating a callback request for you.
-
-Please provide:
-1. Your preferred time (e.g., "tomorrow at 2 PM" or "Monday morning")
-2. Your phone number
-
-Our support team will call you back at that time. A ticket has been created and you'll receive a confirmation email shortly.
-
-Thank you for contacting Ace Cloud Hosting!"""
+            response_text = (
+                "Perfect! I'm creating a callback request for you.\n\n"
+                "Please provide:\n"
+                "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
+                "2. Your phone number\n\n"
+                "Our support team will call you back at that time. A ticket has been created and you'll receive a confirmation email shortly.\n\n"
+                "Thank you for contacting Ace Cloud Hosting!"
+            )
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
-            
-            # Call Desk API to create callback ticket
-            api_result = desk_api.create_callback_ticket(
-                user_email="support@acecloudhosting.com",
-                phone="pending",
-                preferred_time="pending",
-                issue_summary="Callback request from chat"
-            )
-            logger.info(f"[Desk] Callback ticket result: {api_result}")
-            
-            # Close chat in SalesIQ
-            close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
-            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-            
+
+            # Fire-and-forget: protect external calls so webhook never breaks
+            try:
+                api_result = desk_api.create_callback_ticket(
+                    user_email="support@acecloudhosting.com",
+                    phone="pending",
+                    preferred_time="pending",
+                    issue_summary="Callback request from chat"
+                )
+                logger.info(f"[Desk] Callback ticket result: {api_result}")
+            except Exception as e:
+                logger.error(f"[Desk] Callback ticket error: {str(e)}")
+
+            try:
+                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+                logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            except Exception as e:
+                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+
             # Clear conversation after callback (auto-close)
             if session_id in conversations:
                 del conversations[session_id]
-            
+
             return {
                 "action": "reply",
                 "replies": [response_text],
@@ -1117,7 +1121,7 @@ Please provide:
 3. Your phone number
 4. Brief description of the issue
 
-A ticket has been created and you'll receive a confirmation email shortly. Our support team will follow up with you within 24 hours.
+A ticket will be created and you'll receive a confirmation email shortly. Our support team will follow up with you within 24 hours.
 
 Thank you for contacting Ace Cloud Hosting!"""
             conversations[session_id].append({"role": "user", "content": message_text})
