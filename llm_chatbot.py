@@ -589,7 +589,7 @@ Support: 1-888-415-5240
 
 **Adobe Crashing on Open:**
 Step 1: Open Run, type "Regedit.msc"
-Step 2: Navigate to: HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Adobe\Acrobat Reader\DC\FeatureLockDown
+Step 2: Navigate to: HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Adobe\\Acrobat Reader\\DC\\FeatureLockDown
 Step 3: Right-click FeatureLockDown → New → DWORD value
 Step 4: Create DWORD named "bProtectedMode"
 Step 5: Set value to 0, click OK
@@ -627,7 +627,7 @@ Note: Must be done on each user's end
 Support: 1-888-415-5240
 
 **Default Browser on Shared Server:**
-Step 1: Find defaultapplication.bat file (in C:\Script or Desktop)
+Step 1: Find defaultapplication.bat file (in C:\\Script or Desktop)
 Step 2: Place file on user's desktop
 Step 3: Run the file
 Step 4: You can now change default program
