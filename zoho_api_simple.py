@@ -19,15 +19,16 @@ class ZohoSalesIQAPI:
         self.app_id = os.getenv("SALESIQ_APP_ID", "").strip()
         self.screen_name = os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal").strip()
         
-        # Base URL for Visitor API
-        self.base_url = f"https://salesiq.zoho.in/api/visitor/v1/{self.screen_name}"
+        # Base URL for Operator API v2 (accepts OAuth tokens)
+        self.base_url = f"https://salesiq.zoho.in/api/v2/{self.screen_name}"
+        self.org_id = os.getenv("SALESIQ_ORG_ID", "60000687661").strip()
         
         # Enable only if required config exists
         self.enabled = bool(self.access_token and self.department_id and self.app_id)
         if self.enabled:
-            logger.info(f"SalesIQ Visitor API configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
+            logger.info(f"SalesIQ Operator API v2 configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}, org: {self.org_id}")
         else:
-            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
+            logger.warning(f"SalesIQ Operator API not fully configured - token: {bool(self.access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
     
     def create_chat_session(
         self,
@@ -49,54 +50,36 @@ class ZohoSalesIQAPI:
         import requests
         
         headers = {
-            # Per SalesIQ docs, use Zoho-oauthtoken (not Bearer)
             "Authorization": f"Zoho-oauthtoken {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "orgId": self.org_id
         }
         
         # Effective configuration (prefer overrides from webhook)
-        effective_app_id = (app_id or self.app_id).strip() if (app_id or self.app_id) else ""
         effective_department_id = str(department_id or self.department_id).strip()
 
-        # Build visitor payload
-        visitor_payload = {
-            "user_id": visitor_id,
-        }
+        # Extract visitor details from visitor_info or use defaults
+        visitor_name = "Chat User"
+        visitor_email = "support@acecloudhosting.com"
+        
         if visitor_info:
-            # Copy selected optional fields when available
-            for key in [
-                "name",
-                "email",
-                "phone",
-                "platform",
-                "current_page",
-                "page_title",
-                "country_code",
-                "local_time_zone",
-            ]:
-                if key in visitor_info and visitor_info.get(key):
-                    visitor_payload[key] = visitor_info.get(key)
-        else:
-            # Minimal defaults
-            visitor_payload.update({
-                "name": "Chat User",
-                "email": "support@acecloudhosting.com",
-                "platform": "WebBot",
-            })
+            visitor_name = visitor_info.get("name") or visitor_info.get("email", "Chat User")
+            visitor_email = visitor_info.get("email", "support@acecloudhosting.com")
 
+        # Operator API v2 payload structure
         payload: Dict = {
-            "visitor": visitor_payload,
-            "app_id": effective_app_id,
-            "question": conversation_history or "User requested human assistance",
+            "visitor_id": visitor_id,
+            "name": visitor_name,
+            "email": visitor_email,
             "department_id": effective_department_id,
+            "question": conversation_history or "User requested human assistance",
+            "tag_ids": []  # Required field, empty array is valid
         }
-        if custom_wait_time is not None:
-            payload["custom_wait_time"] = custom_wait_time
         
         endpoint = f"{self.base_url}/conversations"
-        logger.info(f"SalesIQ: Visitor API call - POST {endpoint}")
+        logger.info(f"SalesIQ: Operator API v2 call - POST {endpoint}")
         logger.info(
-            f"SalesIQ: Payload: visitor_id={visitor_id}, dept={effective_department_id}, app_id={effective_app_id}"
+            f"SalesIQ: Payload: visitor_id={visitor_id}, dept={effective_department_id}, name={visitor_name}"
         )
         
         try:
