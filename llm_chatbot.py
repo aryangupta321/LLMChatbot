@@ -1359,7 +1359,7 @@ async def test_salesiq_transfer_get():
     """
     try:
         # Use email as user_id (most reliable per API docs) instead of session ID
-        test_user_id = "test.visitor@acecloudhosting.com"
+        test_user_id = "vishal.dharan@acecloudhosting.com"
         conversation_text = "Test transfer from GET endpoint"
         logger.info(f"[Test] Initiating SalesIQ Visitor API transfer (GET) with user_id={test_user_id}")
         result = salesiq_api.create_chat_session(test_user_id, conversation_text)
@@ -1388,7 +1388,7 @@ async def test_salesiq_transfer_post(payload: Dict):
     """
     try:
         # Use email as user_id (more reliable than session IDs)
-        visitor_user_id = str(payload.get("visitor_user_id") or "test.visitor@acecloudhosting.com")
+        visitor_user_id = str(payload.get("visitor_user_id") or "vishal.dharan@acecloudhosting.com")
         conversation_text = str(payload.get("conversation") or "Test transfer from POST endpoint")
         app_id = payload.get("app_id")
         department_id = payload.get("department_id")
