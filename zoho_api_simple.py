@@ -34,7 +34,7 @@ class ZohoSalesIQAPI:
         if self.enabled:
             logger.info(f"SalesIQ Visitor API v1 configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
         else:
-            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
+            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.token_manager.salesiq_access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
     
     def create_chat_session(
         self,

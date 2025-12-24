@@ -58,22 +58,31 @@ class FallbackAPI:
         return {"success": True, "simulated": True, "ticket_number": "TK-SIM-001"}
 
 # Load Zoho API integration with proper error handling
+logger.info("="*70)
+logger.info("ATTEMPTING TO LOAD ZOHO API MODULES...")
+logger.info("="*70)
 try:
+    logger.info("Importing from zoho_api_simple...")
     from zoho_api_simple import ZohoSalesIQAPI, ZohoDeskAPI
+    logger.info("Import successful! Creating instances...")
     salesiq_api = ZohoSalesIQAPI()
     desk_api = ZohoDeskAPI()
-    logger.info(f"Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
+    logger.info(f"SUCCESS: Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
 except ImportError as e:
-    logger.error(f"Failed to import Zoho API module: {str(e)}")
+    logger.error(f"IMPORT ERROR: Failed to import Zoho API module: {str(e)}")
     logger.error(f"ImportError details: {repr(e)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    logger.warning("USING FALLBACK API - This will simulate transfers only!")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
 except Exception as e:
-    logger.error(f"Failed to initialize Zoho API: {str(e)}")
+    logger.error(f"INITIALIZATION ERROR: Failed to initialize Zoho API: {str(e)}")
     logger.error(f"Exception details: {repr(e)}")
     logger.error(f"Traceback: {traceback.format_exc()}")
+    logger.warning("USING FALLBACK API - This will simulate transfers only!")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
+logger.info("="*70)
 
 class Message(BaseModel):
     role: str
