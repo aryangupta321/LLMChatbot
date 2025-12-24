@@ -794,6 +794,29 @@ async def health():
         "webhook_url": "https://web-production-3032d.up.railway.app/webhook/salesiq"
     }
 
+@app.get("/debug/config")
+async def debug_config():
+    """Debug endpoint to check which env vars are set"""
+    import os
+    return {
+        "salesiq": {
+            "enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
+            "OAUTH_ACCESS_TOKEN": "SET ✓" if os.getenv("OAUTH_ACCESS_TOKEN", "").strip() else "MISSING ✗",
+            "SALESIQ_DEPARTMENT_ID": os.getenv("SALESIQ_DEPARTMENT_ID", "MISSING ✗"),
+            "SALESIQ_APP_ID": os.getenv("SALESIQ_APP_ID", "MISSING ✗"),
+            "SALESIQ_SCREEN_NAME": os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal"),
+        },
+        "desk": {
+            "enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
+            "DESK_ORGANIZATION_ID": os.getenv("DESK_ORGANIZATION_ID", "MISSING ✗"),
+        },
+        "oauth": {
+            "OAUTH_CLIENT_ID": "SET ✓" if os.getenv("OAUTH_CLIENT_ID", "").strip() else "MISSING ✗",
+            "OAUTH_CLIENT_SECRET": "SET ✓" if os.getenv("OAUTH_CLIENT_SECRET", "").strip() else "MISSING ✗",
+            "OAUTH_REFRESH_TOKEN": "SET ✓" if os.getenv("OAUTH_REFRESH_TOKEN", "").strip() else "MISSING ✗",
+        }
+    }
+
 @app.get("/callback")
 async def oauth_callback(code: str = None, state: str = None, error: str = None):
     """OAuth 2.0 callback endpoint for Zoho authorization"""
