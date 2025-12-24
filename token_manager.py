@@ -34,11 +34,14 @@ class ZohoTokenManager:
     
     def is_token_expired(self) -> bool:
         """Check if current token is expired or about to expire"""
-        if not self.token_expiry_time:
-            # First run - assume token was just issued
+        if self.token_expiry_time is None:
+            # First run - set token to expire in 1 hour from NOW
+            # This is conservative - token might actually expire sooner if it was issued earlier
             self.token_expiry_time = datetime.now() + timedelta(seconds=self.token_validity_seconds)
-            logger.info(f"[TokenManager] First run - token expiry set to: {self.token_expiry_time}")
-            return False
+            logger.info(f"[TokenManager] First run - assuming token expires in 1 hour at: {self.token_expiry_time}")
+            # Always refresh on first run to get fresh token with known expiry
+            logger.warning(f"[TokenManager] First run - triggering refresh for fresh token with known expiry")
+            return True
         
         now = datetime.now()
         time_until_expiry = (self.token_expiry_time - now).total_seconds()
