@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
-import re
 from openai import OpenAI
 from dotenv import load_dotenv
 import urllib3
@@ -44,7 +43,7 @@ conversations: Dict[str, List[Dict]] = {}
 class FallbackAPI:
     def __init__(self):
         self.enabled = False
-    def create_chat_session(self, visitor_id, conversation_history, app_id=None, department_id=None, visitor_info=None, custom_wait_time=None):
+    def create_chat_session(self, visitor_id, conversation_history):
         logger.info(f"[API] Fallback: Simulating chat transfer for {visitor_id}")
         return {"success": True, "simulated": True, "message": "Chat transfer simulated"}
     def close_chat(self, session_id, reason="resolved"):
@@ -58,31 +57,19 @@ class FallbackAPI:
         return {"success": True, "simulated": True, "ticket_number": "TK-SIM-001"}
 
 # Load Zoho API integration with proper error handling
-logger.info("="*70)
-logger.info("ATTEMPTING TO LOAD ZOHO API MODULES...")
-logger.info("="*70)
 try:
-    logger.info("Importing from zoho_api_simple...")
     from zoho_api_simple import ZohoSalesIQAPI, ZohoDeskAPI
-    logger.info("Import successful! Creating instances...")
     salesiq_api = ZohoSalesIQAPI()
     desk_api = ZohoDeskAPI()
-    logger.info(f"SUCCESS: Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
+    logger.info(f"Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
 except ImportError as e:
-    logger.error(f"IMPORT ERROR: Failed to import Zoho API module: {str(e)}")
-    logger.error(f"ImportError details: {repr(e)}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
-    logger.warning("USING FALLBACK API - This will simulate transfers only!")
+    logger.error(f"Failed to import Zoho API module: {str(e)} - using fallback")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
 except Exception as e:
-    logger.error(f"INITIALIZATION ERROR: Failed to initialize Zoho API: {str(e)}")
-    logger.error(f"Exception details: {repr(e)}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
-    logger.warning("USING FALLBACK API - This will simulate transfers only!")
+    logger.error(f"Failed to initialize Zoho API: {str(e)} - using fallback")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
-logger.info("="*70)
 
 class Message(BaseModel):
     role: str
@@ -794,29 +781,6 @@ async def health():
         "webhook_url": "https://web-production-3032d.up.railway.app/webhook/salesiq"
     }
 
-@app.get("/debug/config")
-async def debug_config():
-    """Debug endpoint to check which env vars are set"""
-    import os
-    return {
-        "salesiq": {
-            "enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
-            "OAUTH_ACCESS_TOKEN": "SET ✓" if os.getenv("OAUTH_ACCESS_TOKEN", "").strip() else "MISSING ✗",
-            "SALESIQ_DEPARTMENT_ID": os.getenv("SALESIQ_DEPARTMENT_ID", "MISSING ✗"),
-            "SALESIQ_APP_ID": os.getenv("SALESIQ_APP_ID", "MISSING ✗"),
-            "SALESIQ_SCREEN_NAME": os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal"),
-        },
-        "desk": {
-            "enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
-            "DESK_ORGANIZATION_ID": os.getenv("DESK_ORGANIZATION_ID", "MISSING ✗"),
-        },
-        "oauth": {
-            "OAUTH_CLIENT_ID": "SET ✓" if os.getenv("OAUTH_CLIENT_ID", "").strip() else "MISSING ✗",
-            "OAUTH_CLIENT_SECRET": "SET ✓" if os.getenv("OAUTH_CLIENT_SECRET", "").strip() else "MISSING ✗",
-            "OAUTH_REFRESH_TOKEN": "SET ✓" if os.getenv("OAUTH_REFRESH_TOKEN", "").strip() else "MISSING ✗",
-        }
-    }
-
 @app.get("/callback")
 async def oauth_callback(code: str = None, state: str = None, error: str = None):
     """OAuth 2.0 callback endpoint for Zoho authorization"""
@@ -1043,7 +1007,7 @@ async def salesiq_webhook(request: dict):
                     conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
                 # Call SalesIQ API to create chat session
-                api_result = salesiq_api.create_chat_session(session_id, conversation_text, visitor_info=None)
+                api_result = salesiq_api.create_chat_session(session_id, conversation_text)
                 logger.info(f"[SalesIQ] API result: {api_result}")
                 
                 # SalesIQ only supports "action": "reply" - transfer happens via API
@@ -1080,8 +1044,8 @@ async def salesiq_webhook(request: dict):
         # Check for not resolved
         not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "still not", "still stuck"]
         if any(keyword in message_lower for keyword in not_resolved_keywords):
-            logger.info(f"[SalesIQ] Issue NOT resolved - offering 2 options with interactive buttons")
-            response_text = "I understand this is frustrating. Here are 2 ways I can help:"
+            logger.info(f"[SalesIQ] Issue NOT resolved - offering 3 options with interactive buttons")
+            response_text = "I understand this is frustrating. Here are 3 ways I can help:"
             
             # Add to history so next response can find it
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -1100,6 +1064,11 @@ async def salesiq_webhook(request: dict):
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
+                    },
+                    {
+                        "text": "🎫 Create Ticket",
+                        "action_type": "reply",
+                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
@@ -1166,205 +1135,92 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check if user is providing callback details (phone + time)
-        # Phone pattern: accepts 7-15 digits with optional formatting
-        callback_pattern = r'(?:phone|ph|contact|number)[\s:]*(\d{7,15}|\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\d{10})'
-        time_keywords = ['tomorrow', 'today', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'am', 'pm', 'morning', 'afternoon', 'evening']
-        
-        has_phone = bool(re.search(callback_pattern, message_lower))
-        has_time = any(keyword in message_lower for keyword in time_keywords)
-        
-        # Check if previous message asked for callback details
-        is_waiting_for_callback = False
-        if session_id in conversations and len(conversations[session_id]) > 0:
-            last_msg = conversations[session_id][-1].get("content", "")
-            # Check if bot asked for callback details (phone + time)
-            if ("phone number" in last_msg.lower() and "preferred" in last_msg.lower() and "time" in last_msg.lower()):
-                is_waiting_for_callback = True
-        
-        if is_waiting_for_callback and has_phone and has_time:
-            logger.info(f"[SalesIQ] Callback details detected - Phone: {has_phone}, Time: {has_time}")
+        # Check for option selections - INSTANT CHAT
+        if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
+            logger.info(f"[SalesIQ] User selected: Instant Chat Transfer")
             
-            # Extract phone from message
-            phone_match = re.search(callback_pattern, message_text)
-            phone_number = phone_match.group(1) if phone_match else "Not provided"
-            
-            # Extract time info
-            time_info = message_text if has_time else "Not provided"
-            
-            logger.info(f"[Desk] Creating callback with Phone: {phone_number}, Time: {time_info}")
-            
-            response_text = (
-                "✅ Thank you! I've created your callback request with:\\n\\n"
-                f"📞 Phone: {phone_number}\\n"
-                f"🕐 Time: {time_info}\\n\\n"
-                "Our support team will call you back at the scheduled time. "
-                "You'll receive a confirmation email shortly.\\n\\n"
-                "Thank you for contacting Ace Cloud Hosting!"
-            )
-            
-            conversations[session_id].append({"role": "user", "content": message_text})
-            conversations[session_id].append({"role": "assistant", "content": response_text})
-            
-            # Extract visitor info from webhook
-            visitor_user_id = visitor.get('user_id', 'customer') if isinstance(visitor, dict) else 'customer'
-            visitor_name = visitor.get('name', 'Customer') if isinstance(visitor, dict) else 'Customer'
-            visitor_email = visitor.get('email', 'support@acecloudhosting.com') if isinstance(visitor, dict) else 'support@acecloudhosting.com'
-            
-            # Create actual Desk Call entry with all required fields per official API docs
             try:
-                api_result = desk_api.create_callback_ticket(
-                    user_email=visitor_email,
-                    phone=phone_number,
-                    preferred_time=time_info,
-                    contact_name=visitor_name,
-                    description=f"Callback request from chat\\n\\nVisitor: {visitor_name}\\nPhone: {phone_number}\\nPreferred Time: {time_info}\\n\\nMessage: {message_text}"
-                )
-                logger.info(f"[Desk] Desk Call created - result: {api_result}")
+                # Build conversation history for agent to see
+                conversation_text = ""
+                for msg in history:
+                    role = "User" if msg.get('role') == 'user' else "Bot"
+                    conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
-                if api_result.get("success"):
-                    logger.info(f"[Desk] Callback successfully created in Desk - Call ID: {api_result.get('call_id')}")
-                    response_text += f"\\n\\n[Call created in Desk]"
-                else:
-                    logger.error(f"[Desk] Failed to create Desk Call: {api_result}")
-                    
-            except Exception as e:
-                logger.error(f"[Desk] Failed to create callback ticket: {str(e)}")
-                logger.error(f"[Desk] Traceback: {traceback.format_exc()}")
+                # Prepare overrides from webhook payload
+                req_meta = request.get('request', {}) if isinstance(request, dict) else {}
+                override_app_id = req_meta.get('app_id') or getattr(salesiq_api, 'app_id', None)
+                override_department_id = visitor.get('department_id') if isinstance(visitor, dict) else None
+                
+                # Extract visitor email as unique identifier (more reliable than IDs)
+                visitor_email = visitor.get('email', 'support@acecloudhosting.com') if isinstance(visitor, dict) else 'support@acecloudhosting.com'
+                
+                # Call SalesIQ API (Visitor API) to create conversation and route to agent
+                logger.info(f"[SalesIQ] Calling create_chat_session API with overrides app_id={override_app_id}, dept={override_department_id}, visitor_email={visitor_email}")
+                
+                # Pass visitor email as user_id (most reliable unique identifier per API docs)
+                api_result = salesiq_api.create_chat_session(
+                    visitor_email,  # Use email as unique user_id per API documentation
+                    conversation_text,
+                    app_id=override_app_id,
+                    department_id=str(override_department_id) if override_department_id else None,
+                    visitor_info=visitor
+                )
+                logger.info(f"[SalesIQ] API result: {api_result}")
+            except Exception as api_error:
+                logger.error(f"[SalesIQ] API call failed: {str(api_error)}")
+                logger.error(f"[SalesIQ] Traceback: {traceback.format_exc()}")
             
-            # Close chat after callback scheduled
-            try:
-                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
-                logger.info(f"[SalesIQ] Chat closed after callback scheduled - result: {close_result}")
-            except Exception as e:
-                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+            # SalesIQ webhooks only support "reply" action, not "transfer"
+            # The transfer happens through the SalesIQ API call above
+            # Send confirmation message to user
+            response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
             
-            # Clear conversation
+            # Clear conversation after transfer
             if session_id in conversations:
                 del conversations[session_id]
-            
-            logger.info(f"[SalesIQ] Callback request completed and conversation cleared")
             
             return {
                 "action": "reply",
                 "replies": [response_text],
-                "session_id": session_id,
-                "callback_created": True
+                "session_id": session_id
             }
         
-        # Check for option selections - INSTANT CHAT (action_value "1" from button)
-        # Supports: button click with action_value="1", text "1", "instant chat", etc.
-        is_instant_chat = (
-            message_lower == "1" or 
-            "instant chat" in message_lower or 
-            "option 1" in message_lower or 
-            "chat/transfer" in message_lower or 
-            payload == "option_1" or
-            payload == "1"
-        )
-        
-        if is_instant_chat:
-            logger.info(f"[SalesIQ] User selected: Instant Chat Transfer (action_value=1)")
-            
-            # Build conversation history for agent to see
-            conversation_text = ""
-            for msg in history:
-                role = "User" if msg.get('role') == 'user' else "Bot"
-                conversation_text += f"{role}: {msg.get('content', '')}\n"
-            
-            # Extract visitor info from webhook payload
-            visitor_user_id = visitor.get('user_id', session_id) if isinstance(visitor, dict) else session_id
-            visitor_name = visitor.get('name', 'Chat User') if isinstance(visitor, dict) else 'Chat User'
-            visitor_email = visitor.get('email', 'support@acecloudhosting.com') if isinstance(visitor, dict) else 'support@acecloudhosting.com'
-            visitor_phone = visitor.get('phone', '') if isinstance(visitor, dict) else ''
-            
-            logger.info(f"[SalesIQ] Visitor Info - user_id: {visitor_user_id}, name: {visitor_name}, email: {visitor_email}")
-            
-            try:
-                # Call SalesIQ "Open Conversation" API with proper visitor payload structure per official docs
-                # This creates a new conversation and routes it to an agent
-                api_result = salesiq_api.create_chat_session(
-                    visitor_id=visitor_user_id,
-                    conversation_history=conversation_text,
-                    visitor_info={
-                        "user_id": visitor_user_id,
-                        "name": visitor_name,
-                        "email": visitor_email,
-                        "phone": visitor_phone
-                    }
-                )
-                logger.info(f"[SalesIQ] Open Conversation API result: {api_result}")
-                
-                if not api_result.get("success"):
-                    error_msg = api_result.get("details", "Chat transfer failed")
-                    logger.warning(f"[SalesIQ] Transfer failed: {error_msg}")
-                    response_text = f"⚠️ {error_msg}\\n\\nNote: Bot preview mode doesn't support chat transfer. Test with a real visitor from your website to transfer chats."
-                    conversations[session_id].append({"role": "user", "content": message_text})
-                    conversations[session_id].append({"role": "assistant", "content": response_text})
-                    
-                    return {
-                        "action": "reply",
-                        "replies": [response_text],
-                        "session_id": session_id
-                    }
-                
-                # Transfer succeeded - send confirmation and close chat
-                response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
-                
-                # Clear conversation after transfer
-                if session_id in conversations:
-                    del conversations[session_id]
-                
-                logger.info(f"[SalesIQ] Chat transfer completed - conversation routed to agent")
-                
-                return {
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id,
-                    "transfer_success": True
-                }
-                    
-            except Exception as api_error:
-                logger.error(f"[SalesIQ] API call failed: {str(api_error)}")
-                logger.error(f"[SalesIQ] Traceback: {traceback.format_exc()}")
-                
-                response_text = "Sorry, I encountered an error connecting to our support team. Please try again or contact us at support@acecloudhosting.com"
-                conversations[session_id].append({"role": "user", "content": message_text})
-                conversations[session_id].append({"role": "assistant", "content": response_text})
-                
-                return {
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
-        
-        # Check for option selections - SCHEDULE CALLBACK (action_value "2" from button)
-        # Supports: button click with action_value="2", text "2", "callback", "schedule", etc.
-        is_schedule_callback = (
-            message_lower == "2" or 
-            "callback" in message_lower or 
-            "option 2" in message_lower or 
-            "schedule" in message_lower or 
-            payload == "option_2" or
-            payload == "2"
-        )
-        
-        if is_schedule_callback:
-            logger.info(f"[SalesIQ] User selected: Schedule Callback (action_value=2)")
-            
+        # Check for option selections - SCHEDULE CALLBACK
+        if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
+            logger.info(f"[SalesIQ] User selected: Schedule Callback")
             response_text = (
-                "Perfect! I'll help you schedule a callback.\\n\\n"
-                "Please provide:\\n"
-                "1️⃣ Your phone number\\n"
-                "2️⃣ Preferred callback time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\\n\\n"
-                "Example: \\\"Phone: 1234567890, Time: tomorrow 3 PM\\\""
+                "Perfect! I'm creating a callback request for you.\n\n"
+                "Please provide:\n"
+                "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
+                "2. Your phone number\n\n"
+                "Our support team will call you back at that time. A ticket has been created and you'll receive a confirmation email shortly.\n\n"
+                "Thank you for contacting Ace Cloud Hosting!"
             )
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
 
-            # Don't close chat yet - wait for callback details (phone + time)
-            logger.info(f"[SalesIQ] Waiting for callback details (phone + time)")
-            
+            # Fire-and-forget: protect external calls so webhook never breaks
+            try:
+                api_result = desk_api.create_callback_ticket(
+                    user_email="support@acecloudhosting.com",
+                    phone="pending",
+                    preferred_time="pending",
+                    issue_summary="Callback request from chat"
+                )
+                logger.info(f"[Desk] Callback ticket result: {api_result}")
+            except Exception as e:
+                logger.error(f"[Desk] Callback ticket error: {str(e)}")
+
+            try:
+                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+                logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            except Exception as e:
+                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+
+            # Clear conversation after callback (auto-close)
+            if session_id in conversations:
+                del conversations[session_id]
+
             return {
                 "action": "reply",
                 "replies": [response_text],
@@ -1435,6 +1291,11 @@ Thank you for contacting Ace Cloud Hosting!"""
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
+                    },
+                    {
+                        "text": "🎫 Create Ticket",
+                        "action_type": "reply",
+                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
@@ -1508,6 +1369,7 @@ Thank you for contacting Ace Cloud Hosting!"""
         
         # Clean response
         response_text = response_text.replace('**', '')
+        import re
         response_text = re.sub(r'^\s*\*\s+', '- ', response_text, flags=re.MULTILINE)
         response_text = re.sub(r'\n\s*\n+', '\n', response_text)
         response_text = response_text.strip()
@@ -1589,7 +1451,7 @@ async def test_salesiq_transfer_get():
         test_user_id = "vishal.dharan@acecloudhosting.com"
         conversation_text = "Test transfer from GET endpoint"
         logger.info(f"[Test] Initiating SalesIQ Visitor API transfer (GET) with user_id={test_user_id}")
-        result = salesiq_api.create_chat_session(test_user_id, conversation_text, visitor_info=None)
+        result = salesiq_api.create_chat_session(test_user_id, conversation_text)
         return {
             "user_id": test_user_id,
             "result": result

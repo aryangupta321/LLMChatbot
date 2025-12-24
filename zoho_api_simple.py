@@ -4,24 +4,17 @@ Simple Zoho API Integration - Working Version
 
 import os
 import logging
-import requests
 from typing import Dict
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
-# Import token manager for automatic refresh
-from token_manager import get_token_manager
 
 
 class ZohoSalesIQAPI:
     """Simple SalesIQ API Integration (Visitor API)"""
     
     def __init__(self):
-        # Get token manager for automatic refresh
-        self.token_manager = get_token_manager()
-        
         # Load configuration
+        self.access_token = os.getenv("SALESIQ_ACCESS_TOKEN", "").strip()
         self.department_id = os.getenv("SALESIQ_DEPARTMENT_ID", "").strip()
         self.app_id = os.getenv("SALESIQ_APP_ID", "").strip()
         self.screen_name = os.getenv("SALESIQ_SCREEN_NAME", "rtdsportal").strip()
@@ -30,19 +23,11 @@ class ZohoSalesIQAPI:
         self.base_url = f"https://salesiq.zoho.in/api/visitor/v1/{self.screen_name}"
         
         # Enable only if required config exists
-        has_token = bool(self.token_manager.salesiq_access_token)
-        has_dept = bool(self.department_id)
-        has_app = bool(self.app_id)
-        
-        self.enabled = has_token and has_dept and has_app
-        
-        # Always log what we found for debugging
-        logger.info(f"[SalesIQ Config Check]")
-        logger.info(f"  - OAUTH_ACCESS_TOKEN: {'✓ SET' if has_token else '✗ MISSING'}")
-        logger.info(f"  - SALESIQ_DEPARTMENT_ID: {'✓ ' + self.department_id if has_dept else '✗ MISSING'}")
-        logger.info(f"  - SALESIQ_APP_ID: {'✓ ' + self.app_id if has_app else '✗ MISSING'}")
-        logger.info(f"  - SALESIQ_SCREEN_NAME: {self.screen_name}")
-        logger.info(f"  - API ENABLED: {'✓ YES' if self.enabled else '✗ NO - Check missing variables above!'}")
+        self.enabled = bool(self.access_token and self.department_id and self.app_id)
+        if self.enabled:
+            logger.info(f"SalesIQ Visitor API v1 configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
+        else:
+            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
     
     def create_chat_session(
         self,
@@ -75,11 +60,8 @@ class ZohoSalesIQAPI:
         
         import requests
         
-        # Get fresh token (auto-refreshes if expired)
-        valid_token = self.token_manager.get_valid_salesiq_token()
-        
         headers = {
-            "Authorization": f"Zoho-oauthtoken {valid_token}",
+            "Authorization": f"Zoho-oauthtoken {self.access_token}",
             "Content-Type": "application/json"
         }
         
@@ -149,339 +131,16 @@ class ZohoSalesIQAPI:
 
 
 class ZohoDeskAPI:
-    """Zoho Desk API Integration - Create tickets and callbacks"""
+    """Simple Desk API Integration"""
     
     def __init__(self):
-        # Get token manager for automatic refresh
-        self.token_manager = get_token_manager()
-        
-        # Load configuration
-        self.organization_id = os.getenv("DESK_ORGANIZATION_ID", "").strip()
-        self.api_url = os.getenv("DESK_API_URL", "https://desk.zoho.in/api/v1").strip()
-        
-        # Enable only if credentials exist
-        has_token = bool(self.token_manager.desk_access_token)
-        has_org = bool(self.organization_id)
-        
-        self.enabled = has_token and has_org
-        
-        # Always log what we found for debugging
-        logger.info(f"[Desk Config Check]")
-        logger.info(f"  - OAUTH_ACCESS_TOKEN: {'✓ SET' if has_token else '✗ MISSING'}")
-        logger.info(f"  - DESK_ORGANIZATION_ID: {'✓ ' + self.organization_id if has_org else '✗ MISSING'}")
-        logger.info(f"  - API ENABLED: {'✓ YES' if self.enabled else '✗ NO - Check missing variables above!'}")
+        self.enabled = False  # Keep disabled for now
+        logger.info("Desk API disabled - ticket creation simulated")
     
-    def create_support_ticket(
-        self,
-        subject: str,
-        description: str,
-        user_email: str,
-        phone: str = "",
-        department: str = "Support",
-        priority: str = "Medium",
-        contact_name: str = ""
-    ) -> dict:
-        """Create a support ticket in Zoho Desk
-        
-        Args:
-            subject: Ticket subject/title
-            description: Detailed issue description
-            user_email: Customer email
-            phone: Customer phone number
-            department: Department to assign ticket
-            priority: Ticket priority (Low, Medium, High)
-            contact_name: Customer name
-        
-        Returns:
-            Dict with success status and ticket details
-        """
-        
-        if not self.enabled:
-            logger.info(f"Desk API disabled - simulating ticket creation for {user_email}")
-            return {
-                "success": True,
-                "simulated": True,
-                "ticket_number": "TK-SIM-001",
-                "message": "Ticket creation simulated"
-            }
-        
-        import requests
-        
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {self.token_manager.get_valid_desk_token()}",
-            "Content-Type": "application/json",
-            "X-Orgn-Id": self.organization_id
-        }
-        
-        # First, find or create the contact
-        contact_id = self._find_or_create_contact(user_email, contact_name, phone)
-        
-        if not contact_id:
-            logger.error(f"Desk: Failed to find/create contact for {user_email}")
-            return {
-                "success": False,
-                "error": "contact_creation_failed",
-                "details": f"Could not find or create contact for {user_email}"
-            }
-        
-        # Create the ticket
-        ticket_payload = {
-            "subject": subject,
-            "description": description,
-            "contactId": contact_id,
-            "priority": priority,
-            "departmentId": department,
-            "status": "Open"
-        }
-        
-        endpoint = f"{self.api_url}/tickets"
-        logger.info(f"Desk: Creating ticket - POST {endpoint}")
-        logger.info(f"Desk: Subject: {subject}, Email: {user_email}")
-        
-        try:
-            response = requests.post(
-                endpoint,
-                json=ticket_payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            logger.info(f"Desk: Response Status: {response.status_code}")
-            logger.info(f"Desk: Response Body: {response.text[:500]}")
-            
-            if response.status_code in [200, 201]:
-                try:
-                    data = response.json()
-                    ticket_id = data.get("id") or data.get("ticketNumber")
-                    return {
-                        "success": True,
-                        "ticket_id": ticket_id,
-                        "data": data
-                    }
-                except Exception:
-                    return {
-                        "success": True,
-                        "message": "Ticket created successfully",
-                        "raw_response": response.text
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": f"{response.status_code}",
-                    "details": response.text
-                }
-        except Exception as e:
-            logger.error(f"Desk: Ticket creation exception: {str(e)}")
-            return {
-                "success": False,
-                "error": "exception",
-                "details": str(e)
-            }
+    def create_callback_ticket(self, *args, **kwargs):
+        logger.info("Desk: Callback ticket creation simulated")
+        return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
     
-    def create_callback_ticket(
-        self,
-        user_email: str,
-        phone: str,
-        preferred_time: str,
-        contact_name: str = "",
-        description: str = ""
-    ) -> dict:
-        """Create a callback entry using Zoho Desk Calls API
-        
-        Args:
-            user_email: Customer email
-            phone: Customer phone number
-            preferred_time: Preferred callback time
-            contact_name: Customer name
-            description: Callback reason/description
-        
-        Returns:
-            Dict with success status and call details
-        """
-        
-        if not self.enabled:
-            logger.info(f"Desk API disabled - simulating callback for {user_email}")
-            return {
-                "success": True,
-                "simulated": True,
-                "call_id": "CB-SIM-001",
-                "message": "Callback creation simulated"
-            }
-        
-        import requests
-        from datetime import datetime, timedelta
-        
-        # Find or create contact
-        contact_id = self._find_or_create_contact(user_email, contact_name or "Customer", phone)
-        
-        if not contact_id:
-            return {
-                "success": False,
-                "error": "contact_creation_failed",
-                "message": "Failed to find or create contact"
-            }
-        
-        # Get valid token
-        valid_token = self.token_manager.get_valid_desk_token()
-        
-        # Prepare headers
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {valid_token}",
-            "Content-Type": "application/json",
-            "orgId": self.organization_id
-        }
-        
-        # Prepare callback time - use current time + 1 hour as placeholder
-        start_time = datetime.utcnow() + timedelta(hours=1)
-        start_time_iso = start_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
-        
-        # Get department ID from environment
-        department_id = os.getenv("DESK_DEPARTMENT_ID", "2782000000002013")
-        
-        # Prepare call payload according to Desk API
-        call_payload = {
-            "departmentId": department_id,
-            "subject": f"Callback Request - {contact_name or user_email}",
-            "startTime": start_time_iso,
-            "direction": "outbound",
-            "duration": 0,
-            "status": "Scheduled",
-            "contactId": contact_id,
-            "priority": "High",
-            "description": f"Callback Request\\n\\nPhone: {phone}\\nPreferred Time: {preferred_time}\\n\\n{description or 'Customer requested callback from support.'}",
-        }
-        
-        endpoint = f"{self.api_url}/calls"
-        logger.info(f"Desk: Creating callback - POST {endpoint}")
-        logger.info(f"Desk: Phone: {phone}, Time: {preferred_time}")
-        
-        try:
-            response = requests.post(
-                endpoint,
-                json=call_payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            logger.info(f"Desk: Response Status: {response.status_code}")
-            logger.info(f"Desk: Response Body: {response.text[:500]}")
-            
-            if response.status_code in [200, 201]:
-                try:
-                    data = response.json()
-                    call_id = data.get("id")
-                    return {
-                        "success": True,
-                        "call_id": call_id,
-                        "data": data,
-                        "message": f"Callback scheduled successfully - Call ID: {call_id}"
-                    }
-                except Exception:
-                    return {
-                        "success": True,
-                        "message": "Callback scheduled successfully",
-                        "raw_response": response.text
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": f"HTTP {response.status_code}",
-                    "message": response.text[:500]
-                }
-        
-        except Exception as e:
-            logger.error(f"Desk: Callback creation exception: {str(e)}")
-            return {
-                "success": False,
-                "error": "exception",
-                "details": str(e)
-            }
-    
-    def _find_or_create_contact(
-        self,
-        email: str,
-        name: str = "",
-        phone: str = ""
-    ) -> str:
-        """Find existing contact or create new one
-        
-        Args:
-            email: Contact email
-            name: Contact name
-            phone: Contact phone
-        
-        Returns:
-            Contact ID if found/created, None otherwise
-        """
-        
-        import requests
-        
-        valid_token = self.token_manager.get_valid_desk_token()
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {valid_token}",
-            "Content-Type": "application/json",
-            "X-Orgn-Id": self.organization_id
-        }
-        
-        # Search for existing contact by email
-        search_endpoint = f"{self.api_url}/contacts"
-        search_params = {
-            "email": email
-        }
-        
-        logger.info(f"Desk: Searching for contact: {email}")
-        
-        try:
-            response = requests.get(
-                search_endpoint,
-                params=search_params,
-                headers=headers,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                contacts = data.get("data", [])
-                
-                if contacts and len(contacts) > 0:
-                    contact_id = contacts[0].get("id")
-                    logger.info(f"Desk: Found existing contact: {contact_id}")
-                    return contact_id
-        
-        except Exception as e:
-            logger.warning(f"Desk: Search failed: {str(e)}")
-        
-        # Contact not found - create new one
-        logger.info(f"Desk: Contact not found - creating new contact")
-        
-        contact_payload = {
-            "email": email,
-            "firstName": name.split()[0] if name else "Customer",
-            "lastName": name.split()[1] if name and len(name.split()) > 1 else "",
-            "phone": phone if phone else ""
-        }
-        
-        create_endpoint = f"{self.api_url}/contacts"
-        
-        try:
-            response = requests.post(
-                create_endpoint,
-                json=contact_payload,
-                headers=headers,
-                timeout=10
-            )
-            
-            logger.info(f"Desk: Contact creation status: {response.status_code}")
-            
-            if response.status_code in [200, 201]:
-                data = response.json()
-                contact_id = data.get("id")
-                logger.info(f"Desk: New contact created: {contact_id}")
-                return contact_id
-            else:
-                logger.error(f"Desk: Contact creation failed: {response.text}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"Desk: Contact creation exception: {str(e)}")
-            return None
+    def create_support_ticket(self, *args, **kwargs):
+        logger.info("Desk: Support ticket creation simulated")
+        return {"success": True, "simulated": True, "ticket_number": "TK-SIM-001"}
