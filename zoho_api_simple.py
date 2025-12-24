@@ -274,7 +274,7 @@ class ZohoDeskAPI:
         contact_name: str = "",
         description: str = ""
     ) -> dict:
-        """Create a callback ticket in Zoho Desk
+        """Create a callback entry using Zoho Desk Calls API
         
         Args:
             user_email: Customer email
@@ -284,40 +284,106 @@ class ZohoDeskAPI:
             description: Callback reason/description
         
         Returns:
-            Dict with success status and ticket details
+            Dict with success status and call details
         """
         
         if not self.enabled:
-            logger.info(f"Desk API disabled - simulating callback ticket for {user_email}")
+            logger.info(f"Desk API disabled - simulating callback for {user_email}")
             return {
                 "success": True,
                 "simulated": True,
-                "ticket_number": "CB-SIM-001",
-                "message": "Callback ticket creation simulated"
+                "call_id": "CB-SIM-001",
+                "message": "Callback creation simulated"
             }
         
-        # Create ticket with callback details
-        subject = f"Callback Request - {contact_name or user_email}"
-        callback_description = f"""
-Callback Request
-================
-Email: {user_email}
-Phone: {phone}
-Preferred Time: {preferred_time}
-Time Submitted: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-{description or 'Customer requested a callback from support team.'}
-"""
+        import requests
+        from datetime import datetime, timedelta
         
-        return self.create_support_ticket(
-            subject=subject,
-            description=callback_description,
-            user_email=user_email,
-            phone=phone,
-            contact_name=contact_name,
-            priority="Medium",
-            department="Callbacks"
-        )
+        # Find or create contact
+        contact_id = self._find_or_create_contact(user_email, contact_name or "Customer", phone)
+        
+        if not contact_id:
+            return {
+                "success": False,
+                "error": "contact_creation_failed",
+                "message": "Failed to find or create contact"
+            }
+        
+        # Get valid token
+        valid_token = self.token_manager.get_valid_desk_token()
+        
+        # Prepare headers
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {valid_token}",
+            "Content-Type": "application/json",
+            "orgId": self.organization_id
+        }
+        
+        # Prepare callback time - use current time + 1 hour as placeholder
+        start_time = datetime.utcnow() + timedelta(hours=1)
+        start_time_iso = start_time.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        
+        # Get department ID from environment
+        department_id = os.getenv("DESK_DEPARTMENT_ID", "2782000000002013")
+        
+        # Prepare call payload according to Desk API
+        call_payload = {
+            "departmentId": department_id,
+            "subject": f"Callback Request - {contact_name or user_email}",
+            "startTime": start_time_iso,
+            "direction": "outbound",
+            "duration": 0,
+            "status": "Scheduled",
+            "contactId": contact_id,
+            "priority": "High",
+            "description": f"Callback Request\\n\\nPhone: {phone}\\nPreferred Time: {preferred_time}\\n\\n{description or 'Customer requested callback from support.'}",
+        }
+        
+        endpoint = f"{self.api_url}/calls"
+        logger.info(f"Desk: Creating callback - POST {endpoint}")
+        logger.info(f"Desk: Phone: {phone}, Time: {preferred_time}")
+        
+        try:
+            response = requests.post(
+                endpoint,
+                json=call_payload,
+                headers=headers,
+                timeout=10
+            )
+            
+            logger.info(f"Desk: Response Status: {response.status_code}")
+            logger.info(f"Desk: Response Body: {response.text[:500]}")
+            
+            if response.status_code in [200, 201]:
+                try:
+                    data = response.json()
+                    call_id = data.get("id")
+                    return {
+                        "success": True,
+                        "call_id": call_id,
+                        "data": data,
+                        "message": f"Callback scheduled successfully - Call ID: {call_id}"
+                    }
+                except Exception:
+                    return {
+                        "success": True,
+                        "message": "Callback scheduled successfully",
+                        "raw_response": response.text
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status_code}",
+                    "message": response.text[:500]
+                }
+        
+        except Exception as e:
+            logger.error(f"Desk: Callback creation exception: {str(e)}")
+            return {
+                "success": False,
+                "error": "exception",
+                "details": str(e)
+            }
     
     def _find_or_create_contact(
         self,

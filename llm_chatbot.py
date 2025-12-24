@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 import urllib3
@@ -1130,6 +1131,72 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
+        # Check if user is providing callback details (phone + time)
+        callback_pattern = r'(?:phone|ph|contact).*?(\d{10}|\d{3}[-.\s]?\d{3}[-.\s]?\d{4})'
+        time_keywords = ['tomorrow', 'today', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'am', 'pm', 'morning', 'afternoon', 'evening']
+        
+        has_phone = bool(re.search(callback_pattern, message_lower))
+        has_time = any(keyword in message_lower for keyword in time_keywords)
+        
+        # Check if previous message asked for callback details
+        is_waiting_for_callback = False
+        if session_id in conversations and len(conversations[session_id]) > 0:
+            last_msg = conversations[session_id][-1].get("content", "")
+            if "provide:" in last_msg and "phone number" in last_msg.lower() and "preferred time" in last_msg.lower():
+                is_waiting_for_callback = True
+        
+        if is_waiting_for_callback and (has_phone or has_time):
+            logger.info(f"[SalesIQ] Callback details detected - Phone: {has_phone}, Time: {has_time}")
+            
+            # Extract phone and time from message
+            phone_match = re.search(callback_pattern, message_lower)
+            phone_number = phone_match.group(1) if phone_match else "Not provided"
+            
+            # Extract time info (simplified - just use the message text)
+            time_info = message_text if has_time else "Not provided"
+            
+            response_text = (
+                "✅ Thank you! I've created your callback request with:\\n\\n"
+                f"📞 Phone: {phone_number}\\n"
+                f"🕐 Time: {time_info}\\n\\n"
+                "Our support team will call you back at the scheduled time. "
+                "You'll receive a confirmation email shortly.\\n\\n"
+                "Thank you for contacting Ace Cloud Hosting!"
+            )
+            
+            conversations[session_id].append({"role": "user", "content": message_text})
+            conversations[session_id].append({"role": "assistant", "content": response_text})
+            
+            # Create actual ticket with details
+            try:
+                api_result = desk_api.create_callback_ticket(
+                    user_email=user_email or "support@acecloudhosting.com",
+                    phone=phone_number,
+                    preferred_time=time_info,
+                    contact_name=user_name or "Customer",
+                    description=f"Callback request from chat\\n\\nPhone: {phone_number}\\nPreferred Time: {time_info}\\n\\nOriginal message: {message_text}"
+                )
+                logger.info(f"[Desk] Callback ticket created with details: {api_result}")
+            except Exception as e:
+                logger.error(f"[Desk] Failed to create callback ticket: {str(e)}")
+            
+            # Close chat after callback scheduled
+            try:
+                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+                logger.info(f"[SalesIQ] Chat closed after callback: {close_result}")
+            except Exception as e:
+                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+            
+            # Clear conversation
+            if session_id in conversations:
+                del conversations[session_id]
+            
+            return {
+                "action": "reply",
+                "replies": [response_text],
+                "session_id": session_id
+            }
+        
         # Check for option selections - INSTANT CHAT
         if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
             logger.info(f"[SalesIQ] User selected: Instant Chat Transfer")
@@ -1184,38 +1251,16 @@ async def salesiq_webhook(request: dict):
         if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
             logger.info(f"[SalesIQ] User selected: Schedule Callback")
             response_text = (
-                "Perfect! I'm creating a callback request for you.\n\n"
-                "Please provide:\n"
-                "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
-                "2. Your phone number\n\n"
-                "Our support team will call you back at that time. A ticket has been created and you'll receive a confirmation email shortly.\n\n"
-                "Thank you for contacting Ace Cloud Hosting!"
+                "Perfect! I'll help you schedule a callback.\\n\\n"
+                "Please provide:\\n"
+                "1️⃣ Your phone number\\n"
+                "2️⃣ Preferred callback time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\\n\\n"
+                "Example: \\\"Phone: 1234567890, Time: tomorrow 3 PM\\\""
             )
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
 
-            # Fire-and-forget: protect external calls so webhook never breaks
-            try:
-                api_result = desk_api.create_callback_ticket(
-                    user_email="support@acecloudhosting.com",
-                    phone="pending",
-                    preferred_time="pending",
-                    issue_summary="Callback request from chat"
-                )
-                logger.info(f"[Desk] Callback ticket result: {api_result}")
-            except Exception as e:
-                logger.error(f"[Desk] Callback ticket error: {str(e)}")
-
-            try:
-                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
-                logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-            except Exception as e:
-                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
-
-            # Clear conversation after callback (auto-close)
-            if session_id in conversations:
-                del conversations[session_id]
-
+            # Don't close chat yet - wait for callback details
             return {
                 "action": "reply",
                 "replies": [response_text],
