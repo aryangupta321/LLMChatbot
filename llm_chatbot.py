@@ -1404,7 +1404,6 @@ Thank you for contacting Ace Cloud Hosting!"""
         
         # Clean response
         response_text = response_text.replace('**', '')
-        import re
         response_text = re.sub(r'^\s*\*\s+', '- ', response_text, flags=re.MULTILINE)
         response_text = re.sub(r'\n\s*\n+', '\n', response_text)
         response_text = response_text.strip()
