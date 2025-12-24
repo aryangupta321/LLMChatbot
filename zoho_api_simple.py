@@ -30,11 +30,19 @@ class ZohoSalesIQAPI:
         self.base_url = f"https://salesiq.zoho.in/api/visitor/v1/{self.screen_name}"
         
         # Enable only if required config exists
-        self.enabled = bool(self.token_manager.salesiq_access_token and self.department_id and self.app_id)
-        if self.enabled:
-            logger.info(f"SalesIQ Visitor API v1 configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
-        else:
-            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.token_manager.salesiq_access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
+        has_token = bool(self.token_manager.salesiq_access_token)
+        has_dept = bool(self.department_id)
+        has_app = bool(self.app_id)
+        
+        self.enabled = has_token and has_dept and has_app
+        
+        # Always log what we found for debugging
+        logger.info(f"[SalesIQ Config Check]")
+        logger.info(f"  - OAUTH_ACCESS_TOKEN: {'✓ SET' if has_token else '✗ MISSING'}")
+        logger.info(f"  - SALESIQ_DEPARTMENT_ID: {'✓ ' + self.department_id if has_dept else '✗ MISSING'}")
+        logger.info(f"  - SALESIQ_APP_ID: {'✓ ' + self.app_id if has_app else '✗ MISSING'}")
+        logger.info(f"  - SALESIQ_SCREEN_NAME: {self.screen_name}")
+        logger.info(f"  - API ENABLED: {'✓ YES' if self.enabled else '✗ NO - Check missing variables above!'}")
     
     def create_chat_session(
         self,
@@ -152,12 +160,16 @@ class ZohoDeskAPI:
         self.api_url = os.getenv("DESK_API_URL", "https://desk.zoho.in/api/v1").strip()
         
         # Enable only if credentials exist
-        self.enabled = bool(self.token_manager.desk_access_token and self.organization_id)
+        has_token = bool(self.token_manager.desk_access_token)
+        has_org = bool(self.organization_id)
         
-        if self.enabled:
-            logger.info(f"Desk API configured - Org: {self.organization_id}")
-        else:
-            logger.warning(f"Desk API not configured - token: {bool(self.token_manager.desk_access_token)}, org_id: {bool(self.organization_id)}")
+        self.enabled = has_token and has_org
+        
+        # Always log what we found for debugging
+        logger.info(f"[Desk Config Check]")
+        logger.info(f"  - OAUTH_ACCESS_TOKEN: {'✓ SET' if has_token else '✗ MISSING'}")
+        logger.info(f"  - DESK_ORGANIZATION_ID: {'✓ ' + self.organization_id if has_org else '✗ MISSING'}")
+        logger.info(f"  - API ENABLED: {'✓ YES' if self.enabled else '✗ NO - Check missing variables above!'}")
     
     def create_support_ticket(
         self,
