@@ -44,7 +44,7 @@ conversations: Dict[str, List[Dict]] = {}
 class FallbackAPI:
     def __init__(self):
         self.enabled = False
-    def create_chat_session(self, visitor_id, conversation_history):
+    def create_chat_session(self, visitor_id, conversation_history, app_id=None, department_id=None, visitor_info=None, custom_wait_time=None):
         logger.info(f"[API] Fallback: Simulating chat transfer for {visitor_id}")
         return {"success": True, "simulated": True, "message": "Chat transfer simulated"}
     def close_chat(self, session_id, reason="resolved"):
@@ -64,11 +64,14 @@ try:
     desk_api = ZohoDeskAPI()
     logger.info(f"Zoho API loaded successfully - SalesIQ enabled: {salesiq_api.enabled}")
 except ImportError as e:
-    logger.error(f"Failed to import Zoho API module: {str(e)} - using fallback")
+    logger.error(f"Failed to import Zoho API module: {str(e)}")
+    logger.error(f"ImportError details: {repr(e)}")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
 except Exception as e:
-    logger.error(f"Failed to initialize Zoho API: {str(e)} - using fallback")
+    logger.error(f"Failed to initialize Zoho API: {str(e)}")
+    logger.error(f"Exception details: {repr(e)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
     salesiq_api = FallbackAPI()
     desk_api = FallbackAPI()
 
@@ -1008,7 +1011,7 @@ async def salesiq_webhook(request: dict):
                     conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
                 # Call SalesIQ API to create chat session
-                api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+                api_result = salesiq_api.create_chat_session(session_id, conversation_text, visitor_info=None)
                 logger.info(f"[SalesIQ] API result: {api_result}")
                 
                 # SalesIQ only supports "action": "reply" - transfer happens via API
@@ -1554,7 +1557,7 @@ async def test_salesiq_transfer_get():
         test_user_id = "vishal.dharan@acecloudhosting.com"
         conversation_text = "Test transfer from GET endpoint"
         logger.info(f"[Test] Initiating SalesIQ Visitor API transfer (GET) with user_id={test_user_id}")
-        result = salesiq_api.create_chat_session(test_user_id, conversation_text)
+        result = salesiq_api.create_chat_session(test_user_id, conversation_text, visitor_info=None)
         return {
             "user_id": test_user_id,
             "result": result
