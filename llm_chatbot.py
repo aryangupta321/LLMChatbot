@@ -1064,11 +1064,6 @@ async def salesiq_webhook(request: dict):
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
-                    },
-                    {
-                        "text": "🎫 Create Ticket",
-                        "action_type": "reply",
-                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
@@ -1291,11 +1286,6 @@ Thank you for contacting Ace Cloud Hosting!"""
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
-                    },
-                    {
-                        "text": "🎫 Create Ticket",
-                        "action_type": "reply",
-                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
