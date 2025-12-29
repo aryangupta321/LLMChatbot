@@ -131,15 +131,51 @@ class ZohoSalesIQAPI:
 
 
 class ZohoDeskAPI:
-    """Simple Desk API Integration"""
+    """Zoho Desk API Integration for Callback Tickets"""
     
     def __init__(self):
-        self.enabled = False  # Keep disabled for now
-        logger.info("Desk API disabled - ticket creation simulated")
+        self.access_token = os.getenv("DESK_ACCESS_TOKEN", "").strip()
+        self.org_id = os.getenv("DESK_ORG_ID", "").strip()
+        self.base_url = "https://desk.zoho.in/api/v1"
+        self.enabled = bool(self.access_token and self.org_id)
+        
+        if self.enabled:
+            logger.info(f"Desk API configured - org_id: {self.org_id}")
+        else:
+            logger.warning("Desk API not configured - ticket creation simulated")
     
-    def create_callback_ticket(self, *args, **kwargs):
-        logger.info("Desk: Callback ticket creation simulated")
-        return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
+    def create_callback_ticket(self, visitor_email: str, visitor_name: str, conversation_history: str, department_name: str = "Support") -> Dict:
+        """Create a callback request ticket in Zoho Desk"""
+        
+        if not self.enabled:
+            logger.info(f"Desk: Callback ticket creation simulated for {visitor_email}")
+            return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
+        
+        import requests
+        
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {self.access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "subject": f"Callback Request from {visitor_name}",
+            "description": f"Customer Name: {visitor_name}\nEmail: {visitor_email}\n\nRequest:\n{conversation_history}",
+            "email": visitor_email,
+            "cf": {"cf_department": department_name}
+        }
+        
+        endpoint = f"{self.base_url}/tickets"
+        
+        try:
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Desk: Callback ticket created - {result.get('id')}")
+            return {"success": True, "ticket_id": result.get("id"), "ticket_number": result.get("ticketNumber")}
+        except Exception as e:
+            logger.error(f"Desk: Error creating callback ticket - {str(e)}")
+            return {"success": False, "error": str(e)}
     
     def create_support_ticket(self, *args, **kwargs):
         logger.info("Desk: Support ticket creation simulated")
