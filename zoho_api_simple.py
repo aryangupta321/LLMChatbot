@@ -339,10 +339,13 @@ class ZohoDeskAPI:
         }
         
         endpoint = f"{self.base_url}/calls"
+        headers = self._headers()
         
         try:
             logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
-            response = requests.post(endpoint, json=payload, headers=self._headers(), timeout=10)
+            logger.info(f"Desk: Token length: {len(self.access_token)}, OrgId: {self.org_id}")
+            logger.info(f"Desk: Payload: {payload}")
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Desk: Callback call created - ID: {result.get('id')}")
