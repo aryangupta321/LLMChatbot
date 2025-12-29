@@ -134,7 +134,7 @@ class ZohoDeskAPI:
     """Zoho Desk API Integration for Callback Tickets"""
     
     def __init__(self):
-        self.access_token = os.getenv("DESK_ACCESS_TOKEN", "").strip()
+        self.access_token = os.getenv("DESK_ACCESS_TOKEN", "").strip().strip('"').strip("'")
 
         # Support both env var names (Railway screenshot uses DESK_ORGANIZATION_ID)
         self.org_id = (
