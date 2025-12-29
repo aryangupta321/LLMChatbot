@@ -143,7 +143,7 @@ class ZohoDeskAPI:
             or os.getenv("DESK_ORGANIZATIONID", "").strip()
         )
 
-        # Allow overriding Desk domain if needed
+        # Allow overriding Desk domain if needed (default to .in for India)
         self.base_url = os.getenv("DESK_BASE_URL", "https://desk.zoho.in/api/v1").strip()
         self.default_department_id = os.getenv("DESK_DEPARTMENT_ID", "").strip() or None
         self.enabled = bool(self.access_token and self.org_id)
