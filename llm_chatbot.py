@@ -1188,12 +1188,18 @@ async def salesiq_webhook(request: dict):
         # Check for option selections - SCHEDULE CALLBACK
         if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
             logger.info(f"[SalesIQ] User selected: Schedule Callback")
+            
+            # Extract visitor info
+            visitor_email = visitor_data.get("email", "support@acecloudhosting.com")
+            visitor_name = visitor_data.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
+            department_id = visitor_data.get("department_id")
+            
             response_text = (
                 "Perfect! I'm creating a callback request for you.\n\n"
                 "Please provide:\n"
                 "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
                 "2. Your phone number\n\n"
-                "Our support team will call you back at that time. A ticket has been created and you'll receive a confirmation email shortly.\n\n"
+                "Our support team will call you back at that time. A callback has been scheduled and you'll receive a confirmation email shortly.\n\n"
                 "Thank you for contacting Ace Cloud Hosting!"
             )
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -1201,15 +1207,18 @@ async def salesiq_webhook(request: dict):
 
             # Fire-and-forget: protect external calls so webhook never breaks
             try:
+                # Get conversation history
+                conv_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversations.get(session_id, [])])
+                
                 api_result = desk_api.create_callback_ticket(
-                    user_email="support@acecloudhosting.com",
-                    phone="pending",
-                    preferred_time="pending",
-                    issue_summary="Callback request from chat"
+                    visitor_email=visitor_email,
+                    visitor_name=visitor_name,
+                    conversation_history=conv_history or "Callback request from chat",
+                    department_id=department_id
                 )
-                logger.info(f"[Desk] Callback ticket result: {api_result}")
+                logger.info(f"[Desk] Callback call result: {api_result}")
             except Exception as e:
-                logger.error(f"[Desk] Callback ticket error: {str(e)}")
+                logger.error(f"[Desk] Callback call error: {str(e)}")
 
             try:
                 close_result = salesiq_api.close_chat(session_id, "callback_scheduled")

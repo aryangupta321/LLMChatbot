@@ -144,37 +144,59 @@ class ZohoDeskAPI:
         else:
             logger.warning("Desk API not configured - ticket creation simulated")
     
-    def create_callback_ticket(self, visitor_email: str, visitor_name: str, conversation_history: str, department_name: str = "Support") -> Dict:
-        """Create a callback request ticket in Zoho Desk"""
+    def create_callback_ticket(self, visitor_email: str, visitor_name: str, conversation_history: str, department_id: str = None, contact_id: str = None) -> Dict:
+        """Create a callback request using Zoho Desk Calls API"""
         
         if not self.enabled:
-            logger.info(f"Desk: Callback ticket creation simulated for {visitor_email}")
-            return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
+            logger.info(f"Desk: Callback call creation simulated for {visitor_email}")
+            return {"success": True, "simulated": True, "call_id": "CALL-SIM-001"}
         
         import requests
+        from datetime import datetime, timezone
         
         headers = {
             "Authorization": f"Zoho-oauthtoken {self.access_token}",
+            "orgId": str(self.org_id),
             "Content-Type": "application/json"
         }
         
+        # Use current time as start time (ISO 8601 format)
+        start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        
+        # Build payload for Desk Calls API
         payload = {
-            "subject": f"Callback Request from {visitor_name}",
-            "description": f"Customer Name: {visitor_name}\nEmail: {visitor_email}\n\nRequest:\n{conversation_history}",
-            "email": visitor_email,
-            "cf": {"cf_department": department_name}
+            "subject": f"Callback Request - {visitor_name}",
+            "description": f"Customer: {visitor_name}\nEmail: {visitor_email}\n\n{conversation_history}",
+            "direction": "inbound",
+            "startTime": start_time,
+            "duration": "0",
+            "status": "Scheduled",
+            "priority": "High"
         }
         
-        endpoint = f"{self.base_url}/tickets"
+        # Add department ID if provided
+        if department_id:
+            payload["departmentId"] = str(department_id)
+        
+        # Add contact ID if provided
+        if contact_id:
+            payload["contactId"] = str(contact_id)
+        
+        endpoint = f"{self.base_url}/calls"
         
         try:
+            logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
             response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
             result = response.json()
-            logger.info(f"Desk: Callback ticket created - {result.get('id')}")
-            return {"success": True, "ticket_id": result.get("id"), "ticket_number": result.get("ticketNumber")}
+            logger.info(f"Desk: Callback call created - ID: {result.get('id')}")
+            return {"success": True, "call_id": result.get("id"), "web_url": result.get("webUrl")}
+        except requests.exceptions.HTTPError as e:
+            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            logger.error(f"Desk: HTTP Error creating callback - {e.response.status_code}: {error_detail}")
+            return {"success": False, "error": f"HTTP {e.response.status_code}: {error_detail}"}
         except Exception as e:
-            logger.error(f"Desk: Error creating callback ticket - {str(e)}")
+            logger.error(f"Desk: Error creating callback - {str(e)}")
             return {"success": False, "error": str(e)}
     
     def create_support_ticket(self, *args, **kwargs):
