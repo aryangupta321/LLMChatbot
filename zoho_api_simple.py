@@ -327,11 +327,14 @@ class ZohoDeskAPI:
         if phone:
             details_block += f"\nPhone: {phone}"
 
+        # Limit description to avoid 400 errors (max ~500 chars recommended)
+        description = f"Callback requested by {visitor_name}\nEmail: {visitor_email}{details_block}"
+        
         payload = {
             "contactId": str(contact_id),
             "departmentId": str(department_id),
             "subject": f"Callback Request - {visitor_name}",
-            "description": f"Customer: {visitor_name}\nEmail: {visitor_email}{details_block}\n\n{conversation_history}",
+            "description": description,
             "direction": "inbound",
             "startTime": start_time,
             "duration": 0,
