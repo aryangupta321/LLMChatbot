@@ -1253,17 +1253,26 @@ async def salesiq_webhook(request: dict):
                 logger.info(f"[Desk] Callback call result: {api_result}")
             except Exception as e:
                 logger.error(f"[Desk] Callback call error: {str(e)}")
+                api_result = {"success": False, "error": "exception", "details": str(e)}
 
-            response_text = "Thank you! I've received your details and scheduled the callback. Our team will contact you shortly. Have a great day!"
+            if api_result.get("success"):
+                response_text = "Thank you! I've received your details and scheduled the callback. Our team will contact you shortly. Have a great day!"
+            else:
+                response_text = (
+                    "I got your details, but I couldn't create the callback in our system right now. "
+                    "Please call our support team at 1-888-415-5240 for immediate help."
+                )
             
-            try:
-                close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
-                logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-            except Exception as e:
-                logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+            # Only close the chat if callback creation succeeded
+            if api_result.get("success"):
+                try:
+                    close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+                    logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+                except Exception as e:
+                    logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
 
-            # Clear conversation after callback (auto-close)
-            if session_id in conversations:
+            # Clear conversation only after success
+            if api_result.get("success") and session_id in conversations:
                 del conversations[session_id]
 
             return {

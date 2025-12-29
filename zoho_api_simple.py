@@ -195,7 +195,12 @@ class ZohoDeskAPI:
                 return str(dept_id)
             return None
         except Exception as e:
-            logger.error("Desk: Failed to fetch departments: %s", str(e))
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            body = getattr(getattr(e, "response", None), "text", None)
+            if status is not None:
+                logger.error("Desk: Failed to fetch departments: HTTP %s - %s", status, body or "")
+            else:
+                logger.error("Desk: Failed to fetch departments: %s", str(e))
             return None
 
     def _find_contact_id_by_email(self, email: str) -> Optional[str]:
@@ -222,7 +227,11 @@ class ZohoDeskAPI:
                 contact_id = first.get("id") if isinstance(first, dict) else None
                 if contact_id:
                     return str(contact_id)
-            except Exception:
+            except Exception as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                body = getattr(getattr(e, "response", None), "text", None)
+                if status is not None:
+                    logger.warning("Desk: Contact lookup failed (%s): HTTP %s - %s", endpoint, status, body or "")
                 continue
 
         return None
@@ -248,7 +257,12 @@ class ZohoDeskAPI:
                 return str(contact_id)
             return None
         except Exception as e:
-            logger.error("Desk: Failed to create contact: %s", str(e))
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            body = getattr(getattr(e, "response", None), "text", None)
+            if status is not None:
+                logger.error("Desk: Failed to create contact: HTTP %s - %s", status, body or "")
+            else:
+                logger.error("Desk: Failed to create contact: %s", str(e))
             return None
     
     def create_callback_ticket(
@@ -284,9 +298,17 @@ class ZohoDeskAPI:
             contact_id = self._create_contact(visitor_email, visitor_name, phone=phone)
 
         if not department_id:
-            return {"success": False, "error": "missing_department_id", "details": "Desk departmentId is required. Set DESK_DEPARTMENT_ID or ensure departments API is accessible."}
+            return {
+                "success": False,
+                "error": "missing_department_id",
+                "details": "Desk departmentId is required. Set DESK_DEPARTMENT_ID. If /departments returns 403, re-generate Desk token with department read scope and ensure DESK_BASE_URL is correct.",
+            }
         if not contact_id:
-            return {"success": False, "error": "missing_contact_id", "details": "Desk contactId is required. Could not find or create contact."}
+            return {
+                "success": False,
+                "error": "missing_contact_id",
+                "details": "Desk contactId is required. If /contacts returns 403, re-generate Desk token with Desk.contacts.READ + Desk.contacts.CREATE (or allow contacts access for the portal).",
+            }
         
         # Use current time as start time (ISO 8601)
         start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
