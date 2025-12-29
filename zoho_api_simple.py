@@ -146,6 +146,7 @@ class ZohoDeskAPI:
         # Allow overriding Desk domain if needed (default to .in for India)
         self.base_url = os.getenv("DESK_BASE_URL", "https://desk.zoho.in/api/v1").strip()
         self.default_department_id = os.getenv("DESK_DEPARTMENT_ID", "").strip() or None
+        self.default_contact_id = os.getenv("DESK_CONTACT_ID", "").strip() or None
         self.enabled = bool(self.access_token and self.org_id)
         
         if self.enabled:
@@ -206,6 +207,11 @@ class ZohoDeskAPI:
             return None
 
     def _find_contact_id_by_email(self, email: str) -> Optional[str]:
+        # If DESK_CONTACT_ID is set, use it directly
+        if self.default_contact_id:
+            logger.info(f"Desk: Using default contactId={self.default_contact_id}")
+            return str(self.default_contact_id)
+        
         if not email:
             return None
 
