@@ -1192,7 +1192,6 @@ async def salesiq_webhook(request: dict):
             # Extract visitor info
             visitor_email = visitor.get("email", "support@acecloudhosting.com")
             visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
-            department_id = visitor.get("department_id")
             
             response_text = (
                 "Perfect! I'm creating a callback request for you.\n\n"
@@ -1224,7 +1223,14 @@ async def salesiq_webhook(request: dict):
             # Extract visitor info
             visitor_email = visitor.get("email", "support@acecloudhosting.com")
             visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
-            department_id = visitor.get("department_id")
+
+            # Best-effort parse for phone / preferred time
+            import re
+            phone_match = re.search(r"\b(?:\+?\d[\d\s-]{8,}\d)\b", message_text)
+            phone = phone_match.group(0).strip() if phone_match else None
+
+            time_match = re.search(r"(?i)\btime\b\s*[:=-]\s*(.+)", message_text)
+            preferred_time = time_match.group(1).strip() if time_match else None
             
             # Add user's details to history
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -1241,7 +1247,8 @@ async def salesiq_webhook(request: dict):
                     visitor_email=visitor_email,
                     visitor_name=visitor_name,
                     conversation_history=full_description,
-                    department_id=department_id
+                    preferred_time=preferred_time,
+                    phone=phone,
                 )
                 logger.info(f"[Desk] Callback call result: {api_result}")
             except Exception as e:

@@ -4,7 +4,7 @@ Simple Zoho API Integration - Working Version
 
 import os
 import logging
-from typing import Dict
+from typing import Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -135,17 +135,138 @@ class ZohoDeskAPI:
     
     def __init__(self):
         self.access_token = os.getenv("DESK_ACCESS_TOKEN", "").strip()
-        self.org_id = os.getenv("DESK_ORG_ID", "").strip()
-        self.base_url = "https://desk.zoho.in/api/v1"
+
+        # Support both env var names (Railway screenshot uses DESK_ORGANIZATION_ID)
+        self.org_id = (
+            os.getenv("DESK_ORG_ID", "").strip()
+            or os.getenv("DESK_ORGANIZATION_ID", "").strip()
+            or os.getenv("DESK_ORGANIZATIONID", "").strip()
+        )
+
+        # Allow overriding Desk domain if needed
+        self.base_url = os.getenv("DESK_BASE_URL", "https://desk.zoho.in/api/v1").strip()
+        self.default_department_id = os.getenv("DESK_DEPARTMENT_ID", "").strip() or None
         self.enabled = bool(self.access_token and self.org_id)
         
         if self.enabled:
-            logger.info(f"Desk API configured - org_id: {self.org_id}")
+            logger.info(
+                "Desk API configured - org_id: %s, base_url: %s, default_department_id: %s",
+                self.org_id,
+                self.base_url,
+                self.default_department_id or "(auto)",
+            )
         else:
-            logger.warning("Desk API not configured - ticket creation simulated")
+            logger.warning(
+                "Desk API not configured - simulated. token=%s orgId=%s (expects DESK_ACCESS_TOKEN and DESK_ORG_ID or DESK_ORGANIZATION_ID)",
+                bool(self.access_token),
+                bool(self.org_id),
+            )
+
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Zoho-oauthtoken {self.access_token}",
+            "orgId": str(self.org_id),
+            "Content-Type": "application/json",
+        }
+
+    def _parse_data_list(self, payload: Any) -> list:
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            return data if isinstance(data, list) else []
+        return payload if isinstance(payload, list) else []
+
+    def _get_default_department_id(self) -> Optional[str]:
+        if self.default_department_id:
+            return str(self.default_department_id)
+
+        import requests
+
+        endpoint = f"{self.base_url}/departments"
+        try:
+            resp = requests.get(endpoint, headers=self._headers(), timeout=10)
+            resp.raise_for_status()
+            items = self._parse_data_list(resp.json())
+            if not items:
+                logger.error("Desk: No departments returned from %s", endpoint)
+                return None
+            dept_id = items[0].get("id") if isinstance(items[0], dict) else None
+            if dept_id:
+                logger.info("Desk: Using default departmentId=%s", dept_id)
+                return str(dept_id)
+            return None
+        except Exception as e:
+            logger.error("Desk: Failed to fetch departments: %s", str(e))
+            return None
+
+    def _find_contact_id_by_email(self, email: str) -> Optional[str]:
+        if not email:
+            return None
+
+        import requests
+
+        endpoints = [
+            f"{self.base_url}/contacts/search?email={email}",
+            f"{self.base_url}/contacts?email={email}",
+        ]
+
+        for endpoint in endpoints:
+            try:
+                resp = requests.get(endpoint, headers=self._headers(), timeout=10)
+                if resp.status_code == 404:
+                    continue
+                resp.raise_for_status()
+                items = self._parse_data_list(resp.json())
+                if not items:
+                    continue
+                first = items[0]
+                contact_id = first.get("id") if isinstance(first, dict) else None
+                if contact_id:
+                    return str(contact_id)
+            except Exception:
+                continue
+
+        return None
+
+    def _create_contact(self, email: str, name: str, phone: Optional[str] = None) -> Optional[str]:
+        import requests
+
+        endpoint = f"{self.base_url}/contacts"
+        last_name = (name or "").strip() or (email.split("@")[0] if email else "Customer")
+        payload: Dict[str, Any] = {
+            "lastName": last_name,
+            "email": email,
+        }
+        if phone:
+            payload["phone"] = phone
+
+        try:
+            resp = requests.post(endpoint, json=payload, headers=self._headers(), timeout=10)
+            resp.raise_for_status()
+            result = resp.json() if resp.content else {}
+            contact_id = result.get("id") if isinstance(result, dict) else None
+            if contact_id:
+                return str(contact_id)
+            return None
+        except Exception as e:
+            logger.error("Desk: Failed to create contact: %s", str(e))
+            return None
     
-    def create_callback_ticket(self, visitor_email: str, visitor_name: str, conversation_history: str, department_id: str = None, contact_id: str = None) -> Dict:
-        """Create a callback request using Zoho Desk Calls API"""
+    def create_callback_ticket(
+        self,
+        visitor_email: str,
+        visitor_name: str,
+        conversation_history: str,
+        preferred_time: Optional[str] = None,
+        phone: Optional[str] = None,
+        desk_department_id: Optional[str] = None,
+    ) -> Dict:
+        """Create a callback request as a Zoho Desk Call activity (POST /calls).
+
+        Desk requires:
+        - orgId header
+        - departmentId
+        - contactId
+        """
         
         if not self.enabled:
             logger.info(f"Desk: Callback call creation simulated for {visitor_email}")
@@ -153,40 +274,45 @@ class ZohoDeskAPI:
         
         import requests
         from datetime import datetime, timezone
+
+        department_id = str(desk_department_id).strip() if desk_department_id else None
+        if not department_id:
+            department_id = self._get_default_department_id()
+
+        contact_id = self._find_contact_id_by_email(visitor_email)
+        if not contact_id:
+            contact_id = self._create_contact(visitor_email, visitor_name, phone=phone)
+
+        if not department_id:
+            return {"success": False, "error": "missing_department_id", "details": "Desk departmentId is required. Set DESK_DEPARTMENT_ID or ensure departments API is accessible."}
+        if not contact_id:
+            return {"success": False, "error": "missing_contact_id", "details": "Desk contactId is required. Could not find or create contact."}
         
-        headers = {
-            "Authorization": f"Zoho-oauthtoken {self.access_token}",
-            "orgId": str(self.org_id),
-            "Content-Type": "application/json"
-        }
-        
-        # Use current time as start time (ISO 8601 format)
+        # Use current time as start time (ISO 8601)
         start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        
-        # Build payload for Desk Calls API
+
+        details_block = ""
+        if preferred_time:
+            details_block += f"\nPreferred time: {preferred_time}"
+        if phone:
+            details_block += f"\nPhone: {phone}"
+
         payload = {
+            "contactId": str(contact_id),
+            "departmentId": str(department_id),
             "subject": f"Callback Request - {visitor_name}",
-            "description": f"Customer: {visitor_name}\nEmail: {visitor_email}\n\n{conversation_history}",
+            "description": f"Customer: {visitor_name}\nEmail: {visitor_email}{details_block}\n\n{conversation_history}",
             "direction": "inbound",
             "startTime": start_time,
-            "duration": "0",
-            "status": "Scheduled",
-            "priority": "High"
+            "duration": 0,
+            "status": "In Progress",
         }
-        
-        # Add department ID if provided
-        if department_id:
-            payload["departmentId"] = str(department_id)
-        
-        # Add contact ID if provided
-        if contact_id:
-            payload["contactId"] = str(contact_id)
         
         endpoint = f"{self.base_url}/calls"
         
         try:
             logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+            response = requests.post(endpoint, json=payload, headers=self._headers(), timeout=10)
             response.raise_for_status()
             result = response.json()
             logger.info(f"Desk: Callback call created - ID: {result.get('id')}")
