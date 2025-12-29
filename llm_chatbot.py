@@ -1190,9 +1190,9 @@ async def salesiq_webhook(request: dict):
             logger.info(f"[SalesIQ] User selected: Schedule Callback")
             
             # Extract visitor info
-            visitor_email = visitor_data.get("email", "support@acecloudhosting.com")
-            visitor_name = visitor_data.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
-            department_id = visitor_data.get("department_id")
+            visitor_email = visitor.get("email", "support@acecloudhosting.com")
+            visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
+            department_id = visitor.get("department_id")
             
             response_text = (
                 "Perfect! I'm creating a callback request for you.\n\n"
