@@ -182,8 +182,10 @@ class ZohoDeskAPI:
         import requests
 
         endpoint = f"{self.base_url}/departments"
+        headers = self._headers()
+        logger.info(f"Desk: GET {endpoint} with headers: Authorization=Zoho-oauthtoken {self.access_token[:20]}..., orgId={headers.get('orgId')}")
         try:
-            resp = requests.get(endpoint, headers=self._headers(), timeout=10)
+            resp = requests.get(endpoint, headers=headers, timeout=10)
             resp.raise_for_status()
             items = self._parse_data_list(resp.json())
             if not items:
