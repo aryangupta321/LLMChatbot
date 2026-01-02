@@ -600,26 +600,39 @@ async def salesiq_webhook(request: dict):
                     "session_id": session_id
                 }
         
-        # Check for issue resolution
-        resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set"]
+        # Check for issue resolution - COMPREHENSIVE AUTO-CLOSE
+        resolution_keywords = [
+            # Direct resolution confirmations
+            "resolved", "fixed", "working now", "solved", "all set", "working fine",
+            "works now", "problem solved", "issue fixed", "issue resolved",
+            
+            # Satisfaction expressions
+            "perfect", "great", "excellent", "wonderful", "amazing", "awesome",
+            "that worked", "that works", "that helped", "that fixed it",
+            "it works", "it's working", "its working", "all good", "working good",
+            
+            # Completion phrases
+            "done", "sorted", "taken care of", "all clear", "no more issues",
+            "no problem now", "back to normal", "functioning", "operational"
+        ]
         if any(keyword in message_lower for keyword in resolution_keywords):
             logger.info(f"[Resolution] ✓ ISSUE RESOLVED")
-            logger.info(f"[Resolution] Reason: User confirmed fix worked")
-            logger.info(f"[Resolution] Action: Closing chat session")
+            logger.info(f"[Resolution] Reason: User confirmed fix worked - '{message_text[:50]}'")
+            logger.info(f"[Resolution] Action: Auto-closing chat session")
             
             # Transition to resolved state
             state_manager.end_session(session_id, ConversationState.RESOLVED)
             
-            response_text = "Great! I'm glad the issue is resolved. If you need anything else, feel free to ask!"
+            response_text = "Excellent! I'm happy the issue is resolved. This chat will close automatically. Feel free to start a new chat if you need help in the future. Have a great day!"
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            # Close chat in SalesIQ since issue is resolved
+            # Auto-close chat in SalesIQ since issue is resolved
             close_result = salesiq_api.close_chat(session_id, "resolved")
             if close_result.get('success'):
-                logger.info(f"[Action] ✓ CHAT CLOSED SUCCESSFULLY")
+                logger.info(f"[Action] ✓ CHAT AUTO-CLOSED SUCCESSFULLY")
             else:
-                logger.warning(f"[Action] Chat closure completed with status: {close_result}")
+                logger.warning(f"[Action] Chat closure attempted with status: {close_result}")
             
             if session_id in conversations:
                 metrics_collector.end_conversation(session_id, "resolved")
@@ -1048,6 +1061,14 @@ async def salesiq_webhook(request: dict):
         
         is_acknowledgment = is_acknowledgment_message(message_lower)
         
+        # Check for final goodbye/thanks that should close chat
+        final_goodbye_keywords = [
+            "thanks bye", "thank you bye", "goodbye", "good bye", "bye bye", "see you",
+            "that's all", "thats all", "nothing else", "no more questions",
+            "all done", "i'm good", "im good", "we're good", "were good"
+        ]
+        is_final_goodbye = any(keyword in message_lower for keyword in final_goodbye_keywords)
+        
         if is_acknowledgment and not is_in_troubleshooting:
             logger.info(f"[SalesIQ] Acknowledgment detected (not in troubleshooting)")
             if message_lower in ["ok", "okay"]:
@@ -1055,6 +1076,30 @@ async def salesiq_webhook(request: dict):
                 return {
                     "action": "reply",
                     "replies": ["Is there anything else I can help you with?"],
+                    "session_id": session_id
+                }
+            elif is_final_goodbye:
+                # User is done - auto-close chat
+                logger.info(f"[Resolution] ✓ User signaled conversation complete")
+                logger.info(f"[Resolution] Action: Auto-closing chat session")
+                
+                response_text = "You're welcome! Have a great day!"
+                conversations[session_id].append({"role": "user", "content": message_text})
+                conversations[session_id].append({"role": "assistant", "content": response_text})
+                
+                # Auto-close chat
+                close_result = salesiq_api.close_chat(session_id, "completed")
+                if close_result.get('success'):
+                    logger.info(f"[Action] ✓ CHAT AUTO-CLOSED SUCCESSFULLY")
+                
+                if session_id in conversations:
+                    metrics_collector.end_conversation(session_id, "resolved")
+                    state_manager.end_session(session_id, ConversationState.RESOLVED)
+                    del conversations[session_id]
+                
+                return {
+                    "action": "reply",
+                    "replies": [response_text],
                     "session_id": session_id
                 }
             else:
@@ -1067,6 +1112,36 @@ async def salesiq_webhook(request: dict):
         elif is_acknowledgment and is_in_troubleshooting:
             logger.info(f"[SalesIQ] Acknowledgment during troubleshooting - continuing with LLM")
             # Fall through to LLM to continue with next step
+        
+        # Check if user said "no" to our "anything else" question
+        if len(history) > 0:
+            last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
+            if 'anything else i can help you with' in last_bot_message.lower():
+                # Bot asked if they need more help
+                negative_responses = ["no", "nope", "no thanks", "no thank you", "nah", "i'm good", "im good", "that's all", "thats all"]
+                if message_lower in negative_responses or any(neg in message_lower for neg in ["no", "nope", "nah"]):
+                    logger.info(f"[Resolution] ✓ User declined further assistance")
+                    logger.info(f"[Resolution] Action: Auto-closing chat session")
+                    
+                    response_text = "Perfect! Thank you for chatting. This chat will close now. Have a great day!"
+                    conversations[session_id].append({"role": "user", "content": message_text})
+                    conversations[session_id].append({"role": "assistant", "content": response_text})
+                    
+                    # Auto-close chat
+                    close_result = salesiq_api.close_chat(session_id, "completed")
+                    if close_result.get('success'):
+                        logger.info(f"[Action] ✓ CHAT AUTO-CLOSED SUCCESSFULLY")
+                    
+                    if session_id in conversations:
+                        metrics_collector.end_conversation(session_id, "resolved")
+                        state_manager.end_session(session_id, ConversationState.RESOLVED)
+                        del conversations[session_id]
+                    
+                    return {
+                        "action": "reply",
+                        "replies": [response_text],
+                        "session_id": session_id
+                    }
         
         # Classify message category using IssueRouter (saves 60% of LLM tokens)
         category = issue_router.classify(message_text)
