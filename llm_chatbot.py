@@ -630,16 +630,41 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for not resolved
-        not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "still not", "still stuck"]
+        # Check for not resolved - COMPREHENSIVE DETECTION
+        not_resolved_keywords = [
+            # Direct "not working" statements
+            "not resolved", "not fixed", "not working", "didn't work", "doesn't work", "does not work",
+            "still not", "still stuck", "still broken", "still having", "still same", "same issue",
+            "same problem", "no progress", "no change", "nothing changed", "nothing worked",
+            
+            # Negative feedback
+            "that doesn't help", "that didn't help", "doesn't help", "not helpful", "unhelpful",
+            "wrong answer", "not right", "incorrect", "not what i need", "not solving",
+            
+            # Problem persistence
+            "issue persist", "problem persist", "keep getting", "keeps happening", "still error",
+            "error again", "again", "tried that", "already tried", "done that",
+            
+            # Frustration indicators
+            "frustrated", "frustrating", "annoyed", "annoying", "waste of time", "wasting time",
+            "tired of", "fed up", "had enough", "ridiculous", "unacceptable",
+            
+            # Dissatisfaction
+            "disappointed", "dissatisfied", "not satisfied", "unhappy", "upset",
+            "this sucks", "terrible", "awful", "horrible", "useless",
+            
+            # Urgency/severity
+            "urgent", "emergency", "critical", "serious", "major issue", "big problem"
+        ]
         if any(keyword in message_lower for keyword in not_resolved_keywords):
             logger.info(f"[Escalation] 🆙 PROBLEM NOT RESOLVED - Offering escalation options")
+            logger.info(f"[Escalation] Detected keyword in: {message_text[:100]}")
             logger.info(f"[Escalation] Options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
             
             # Transition to escalation options state
             state_manager.transition(session_id, TransitionTrigger.SOLUTION_FAILED)
             
-            response_text = "I understand this is frustrating. Here are 3 ways I can help:"
+            response_text = "I understand this needs immediate attention. Let me connect you with the right support:"
             
             # Add to history so next response can find it
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -944,17 +969,38 @@ Thank you for contacting Ace Cloud Hosting!"""
                 "replies": [response_text],
                 "session_id": session_id
             }
-        #check for new request
-        # Check for agent connection requests (legacy)
-        agent_request_phrases = ["connect me to agent", "connect to agent", "human agent", "talk to human", "speak to agent"]
+        # Check for agent connection requests - COMPREHENSIVE DETECTION
+        agent_request_phrases = [
+            # Direct agent requests
+            "connect me to agent", "connect to agent", "human agent", "talk to human", "speak to agent",
+            "speak to someone", "talk to someone", "connect to human", "real person", "live person",
+            "customer service", "customer support", "support agent", "support representative",
+            
+            # Escalation language
+            "escalate", "supervisor", "manager", "senior support", "higher level",
+            "transfer me", "transfer to", "forward to", "put me through",
+            
+            # Help requests
+            "need help now", "need immediate help", "need assistance", "get me help",
+            "i need someone", "can someone help", "someone help me",
+            
+            # Alternative phrasing
+            "speak with agent", "talk with agent", "chat with agent", "contact agent",
+            "operator", "representative", "specialist", "expert",
+            
+            # Direct requests
+            "get me someone", "can i talk to", "may i speak", "i want to talk", "i want to speak",
+            "let me talk", "let me speak", "connect me", "transfer call"
+        ]
         if any(phrase in message_lower for phrase in agent_request_phrases):
             logger.info(f"[Escalation] 🆙 ESCALATION REQUESTED - User wants human agent")
+            logger.info(f"[Escalation] Detected phrase in: {message_text[:100]}")
             logger.info(f"[Escalation] Showing 3 options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
             
             # Transition to escalation options
             state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
             
-            response_text = "I can help you with that. Here are your options:"
+            response_text = "Absolutely, I'll connect you with our support team. Please choose your preferred option:"
             
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
