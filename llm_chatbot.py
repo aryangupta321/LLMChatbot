@@ -259,7 +259,7 @@ IMPORTANT NOTES:
 SUPPORT CONTACT:
 Phone: 1-888-415-5240
 Email: support@acecloudhosting.com
-"""
+
 - For greetings (hi, hello), vary your responses naturally:
   * First greeting: "Hello! I'm AceBuddy. How can I assist you today?"
   * Repeated greeting: "Hi there! What can I help you with?" or "Hey! What's on your mind?" or "Hello again! How can I help?"
@@ -1258,8 +1258,8 @@ async def salesiq_webhook(request: dict):
         # Check for not resolved
         not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "still not", "still stuck"]
         if any(keyword in message_lower for keyword in not_resolved_keywords):
-            logger.info(f"[SalesIQ] Issue NOT resolved - offering 3 options with interactive buttons")
-            response_text = "I understand this is frustrating. Here are 3 ways I can help:"
+            logger.info(f"[SalesIQ] Issue NOT resolved - offering 2 options with interactive buttons")
+            response_text = "I understand this is frustrating. Here are 2 ways I can help:"
             
             # Add to history so next response can find it
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -1270,7 +1270,7 @@ async def salesiq_webhook(request: dict):
                 "replies": [response_text],
                 "suggestions": [
                     {
-                        "text": "📞 Instant Chat",
+                        "text": "💬 Transfer to Live Agent",
                         "action_type": "reply",
                         "action_value": "1"
                     },
@@ -1344,9 +1344,9 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for option selections - INSTANT CHAT
-        if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
-            logger.info(f"[SalesIQ] User selected: Instant Chat Transfer")
+        # Check for option selections - INSTANT CHAT / TRANSFER
+        if "transfer" in message_lower or "live agent" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
+            logger.info(f"[SalesIQ] User selected: Live Agent Transfer")
             
             try:
                 # Build conversation history for agent to see
@@ -1489,48 +1489,6 @@ async def salesiq_webhook(request: dict):
                 "replies": [response_text],
                 "session_id": session_id
             }
-        
-        # Check for option selections - CREATE TICKET
-        if "ticket" in message_lower or "option 3" in message_lower or message_lower == "3" or "support ticket" in message_lower or payload == "option_3":
-            logger.info(f"[SalesIQ] User selected: Create Support Ticket")
-            response_text = """Perfect! I'm creating a support ticket for you.
-
-Please provide:
-1. Your name
-2. Your email
-3. Your phone number
-4. Brief description of the issue
-
-A ticket will be created and you'll receive a confirmation email shortly. Our support team will follow up with you within 24 hours.
-
-Thank you for contacting Ace Cloud Hosting!"""
-            conversations[session_id].append({"role": "user", "content": message_text})
-            conversations[session_id].append({"role": "assistant", "content": response_text})
-            
-            # Call Desk API to create support ticket
-            api_result = desk_api.create_support_ticket(
-                user_name="pending",
-                user_email="pending",
-                phone="pending",
-                description="Support ticket from chat",
-                issue_type="general",
-                conversation_history="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
-            )
-            logger.info(f"[Desk] Support ticket result: {api_result}")
-            
-            # Close chat in SalesIQ
-            close_result = salesiq_api.close_chat(session_id, "ticket_created")
-            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-            
-            # Clear conversation after ticket creation (auto-close)
-            if session_id in conversations:
-                del conversations[session_id]
-            
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
         #check for new request
         # Check for agent connection requests (legacy)
         agent_request_phrases = ["connect me to agent", "connect to agent", "human agent", "talk to human", "speak to agent"]
@@ -1546,7 +1504,7 @@ Thank you for contacting Ace Cloud Hosting!"""
                 "replies": [response_text],
                 "suggestions": [
                     {
-                        "text": "📞 Instant Chat",
+                        "text": "� Transfer to Live Agent",
                         "action_type": "reply",
                         "action_value": "1"
                     },
@@ -1554,11 +1512,6 @@ Thank you for contacting Ace Cloud Hosting!"""
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
-                    },
-                    {
-                        "text": "🎫 Create Ticket",
-                        "action_type": "reply",
-                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
