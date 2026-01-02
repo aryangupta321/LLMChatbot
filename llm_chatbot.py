@@ -532,7 +532,8 @@ async def salesiq_webhook(request: dict):
         
         # Handle empty message
         if not message_text:
-            logger.info(f"[SalesIQ] Empty message, sending greeting")
+            logger.info(f"[Session] 👋 INITIAL CONTACT - Sending greeting")
+            logger.info(f"[Session] New visitor from: {visitor.get('email', 'unknown')}")
             return {
                 "action": "reply",
                 "replies": ["Hi! I'm AceBuddy, your Ace Cloud Hosting support assistant. What can I help you with today?"],
@@ -542,6 +543,7 @@ async def salesiq_webhook(request: dict):
         # Initialize conversation history
         if session_id not in conversations:
             conversations[session_id] = []
+            logger.info(f"[Session] ✓ NEW CONVERSATION STARTED | Category: {issue_router.classify(message_text)}")
         
         history = conversations[session_id]
         message_lower = message_text.lower().strip()
@@ -601,7 +603,9 @@ async def salesiq_webhook(request: dict):
         # Check for issue resolution
         resolution_keywords = ["resolved", "fixed", "working now", "solved", "all set"]
         if any(keyword in message_lower for keyword in resolution_keywords):
-            logger.info(f"[SalesIQ] Issue resolved by user")
+            logger.info(f"[Resolution] ✓ ISSUE RESOLVED")
+            logger.info(f"[Resolution] Reason: User confirmed fix worked")
+            logger.info(f"[Resolution] Action: Closing chat session")
             
             # Transition to resolved state
             state_manager.end_session(session_id, ConversationState.RESOLVED)
@@ -612,7 +616,10 @@ async def salesiq_webhook(request: dict):
             
             # Close chat in SalesIQ since issue is resolved
             close_result = salesiq_api.close_chat(session_id, "resolved")
-            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            if close_result.get('success'):
+                logger.info(f"[Action] ✓ CHAT CLOSED SUCCESSFULLY")
+            else:
+                logger.warning(f"[Action] Chat closure completed with status: {close_result}")
             
             if session_id in conversations:
                 metrics_collector.end_conversation(session_id, "resolved")
@@ -626,7 +633,8 @@ async def salesiq_webhook(request: dict):
         # Check for not resolved
         not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "still not", "still stuck"]
         if any(keyword in message_lower for keyword in not_resolved_keywords):
-            logger.info(f"[SalesIQ] Issue NOT resolved - offering 3 options with interactive buttons")
+            logger.info(f"[Escalation] 🆙 PROBLEM NOT RESOLVED - Offering escalation options")
+            logger.info(f"[Escalation] Options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
             
             # Transition to escalation options state
             state_manager.transition(session_id, TransitionTrigger.SOLUTION_FAILED)
@@ -718,7 +726,9 @@ async def salesiq_webhook(request: dict):
         
         # Check for option selections - INSTANT CHAT
         if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
-            logger.info(f"[SalesIQ] User selected: Instant Chat Transfer")
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
+            logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
+            logger.info(f"[Action] Status: Connecting visitor to live agent...")
             
             try:
                 # Build conversation history for agent to see
@@ -756,6 +766,8 @@ async def salesiq_webhook(request: dict):
             # Send confirmation message to user
             response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
             
+            logger.info(f"[Action] ✓ TRANSFER CONFIRMATION SENT")
+            
             # Clear conversation after transfer
             if session_id in conversations:
                 metrics_collector.end_conversation(session_id, "escalated")
@@ -769,7 +781,8 @@ async def salesiq_webhook(request: dict):
         
         # Check for option selections - SCHEDULE CALLBACK
         if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
-            logger.info(f"[SalesIQ] User selected: Schedule Callback")
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Schedule Callback (Option 2)")
+            logger.info(f"[Action] 📞 CALLBACK SCHEDULED - Waiting for time & phone details")
             
             # Transition to callback collection state
             state_manager.transition(session_id, TransitionTrigger.CALLBACK_REQUESTED)
@@ -841,8 +854,13 @@ async def salesiq_webhook(request: dict):
                 api_result = {"success": False, "error": "exception", "details": str(e)}
 
             if api_result.get("success"):
+                logger.info(f"[Action] ✓ CALLBACK TICKET CREATED SUCCESSFULLY")
+                logger.info(f"[Action] 📞 Callback scheduled for visitor: {visitor.get('name', 'Unknown')}")
+                logger.info(f"[Action] Email: {visitor.get('email', 'Not provided')}")
                 response_text = "Thank you! I've received your details and scheduled the callback. Our team will contact you shortly. Have a great day!"
             else:
+                logger.warning(f"[Action] ✗ CALLBACK TICKET CREATION FAILED")
+                logger.warning(f"[Action] Error: {api_result.get('error', 'Unknown error')}")
                 response_text = (
                     "I got your details, but I couldn't create the callback in our system right now. "
                     "Please call our support team at 1-888-415-5240 for immediate help."
@@ -858,6 +876,7 @@ async def salesiq_webhook(request: dict):
 
             # Clear conversation only after success
             if api_result.get("success") and session_id in conversations:
+                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Callback Scheduled")
                 metrics_collector.end_conversation(session_id, "resolved")
                 del conversations[session_id]
 
@@ -869,7 +888,9 @@ async def salesiq_webhook(request: dict):
         
         # Check for option selections - CREATE TICKET
         if "ticket" in message_lower or "option 3" in message_lower or message_lower == "3" or "support ticket" in message_lower or payload == "option_3":
-            logger.info(f"[SalesIQ] User selected: Create Support Ticket")
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Create Support Ticket (Option 3)")
+            logger.info(f"[Action] 🎫 SUPPORT TICKET CREATION INITIATED")
+            logger.info(f"[Action] Status: Collecting user details for support ticket...")
             
             # Transition to ticket collection state
             state_manager.transition(session_id, TransitionTrigger.TICKET_REQUESTED)
@@ -897,6 +918,15 @@ Thank you for contacting Ace Cloud Hosting!"""
                 issue_type="general",
                 conversation_history="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
             )
+            
+            if api_result.get("success"):
+                logger.info(f"[Action] ✓ SUPPORT TICKET CREATED SUCCESSFULLY")
+                logger.info(f"[Action] 🎫 Ticket ID: {api_result.get('ticket_id', 'Generated')}")
+                logger.info(f"[Action] Status: Closing chat and transferring to support queue")
+            else:
+                logger.warning(f"[Action] ✗ SUPPORT TICKET CREATION FAILED")
+                logger.warning(f"[Action] Error: {api_result.get('error', 'Unknown error')}")
+            
             logger.info(f"[Desk] Support ticket result: {api_result}")
             
             # Close chat in SalesIQ
@@ -905,6 +935,7 @@ Thank you for contacting Ace Cloud Hosting!"""
             
             # Clear conversation after ticket creation (auto-close)
             if session_id in conversations:
+                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Support Ticket Created")
                 metrics_collector.end_conversation(session_id, "escalated")
                 del conversations[session_id]
             
@@ -917,7 +948,8 @@ Thank you for contacting Ace Cloud Hosting!"""
         # Check for agent connection requests (legacy)
         agent_request_phrases = ["connect me to agent", "connect to agent", "human agent", "talk to human", "speak to agent"]
         if any(phrase in message_lower for phrase in agent_request_phrases):
-            logger.info(f"[SalesIQ] User requesting human agent - offering options with interactive buttons")
+            logger.info(f"[Escalation] 🆙 ESCALATION REQUESTED - User wants human agent")
+            logger.info(f"[Escalation] Showing 3 options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
             
             # Transition to escalation options
             state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
@@ -1014,6 +1046,8 @@ Thank you for contacting Ace Cloud Hosting!"""
         # Initialize state tracking for new conversations
         if session_id not in conversations or len(conversations[session_id]) == 0:
             router_matched = category != "other"
+            logger.info(f"[Metrics] 📊 NEW CONVERSATION STARTED")
+            logger.info(f"[Metrics] Category: {category}, Router Matched: {router_matched}")
             metrics_collector.start_conversation(session_id, category, router_matched)
             
             # Create state management session
@@ -1045,7 +1079,8 @@ Thank you for contacting Ace Cloud Hosting!"""
         
         # If handler matched and returned response, use it
         if handler_response and handler_response.text:
-            logger.info(f"[Handler] Response from handler system")
+            logger.info(f"[Handler] ✅ HANDLER MATCHED - Processing response")
+            logger.info(f"[Handler] Response text: {handler_response.text[:150]}...")
             response_text = handler_response.text
             
             # Update state if handler requested it
@@ -1068,6 +1103,8 @@ Thank you for contacting Ace Cloud Hosting!"""
                 logger.info(f"[Handler] Chat closure result: {close_result}")
                 
                 if session_id in conversations:
+                    reason = metadata.get("reason", "resolved")
+                    logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: {reason.upper()}")
                     metrics_collector.end_conversation(session_id, "resolved")
                     state_manager.end_session(session_id, ConversationState.RESOLVED)
                     del conversations[session_id]
@@ -1097,6 +1134,7 @@ Thank you for contacting Ace Cloud Hosting!"""
                 logger.info(f"[Handler] Transfer API result: {api_result}")
                 
                 if session_id in conversations:
+                    logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Agent Transfer")
                     metrics_collector.end_conversation(session_id, "escalated")
                     state_manager.end_session(session_id, ConversationState.ESCALATED)
                     del conversations[session_id]
@@ -1116,6 +1154,7 @@ Thank you for contacting Ace Cloud Hosting!"""
                 logger.info(f"[Handler] Callback API result: {api_result}")
                 
                 if api_result.get("success"):
+                    logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Callback Scheduled")
                     close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
                     logger.info(f"[Handler] Chat closure result: {close_result}")
                     
@@ -1136,6 +1175,7 @@ Thank you for contacting Ace Cloud Hosting!"""
                 )
                 logger.info(f"[Handler] Ticket API result: {api_result}")
                 
+                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Support Ticket Created")
                 close_result = salesiq_api.close_chat(session_id, "ticket_created")
                 logger.info(f"[Handler] Chat closure result: {close_result}")
                 
@@ -1158,10 +1198,12 @@ Thank you for contacting Ace Cloud Hosting!"""
         logger.info(f"[Handler] No handler matched, continuing with existing logic")
         
         # Generate LLM response with embedded resolution steps
-        logger.info(f"[SalesIQ] Calling OpenAI LLM with embedded resolution steps...")
+        logger.info(f"[LLM] 🤖 CALLING GPT-4o-mini for category: {category}")
         response_text, tokens_used = generate_response(message_text, history, category=category)
+        logger.info(f"[LLM] ✓ Response generated | Tokens used: {tokens_used} | Category: {category}")
         
         # Record metrics
+        logger.info(f"[Metrics] 📊 Recording message: LLM=True, Tokens={tokens_used}, Category={category}")
         metrics_collector.record_message(session_id, is_llm_call=True, tokens_used=tokens_used)
         
         # Clean response
