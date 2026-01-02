@@ -659,7 +659,7 @@ async def salesiq_webhook(request: dict):
         if any(keyword in message_lower for keyword in not_resolved_keywords):
             logger.info(f"[Escalation] 🆙 PROBLEM NOT RESOLVED - Offering escalation options")
             logger.info(f"[Escalation] Detected keyword in: {message_text[:100]}")
-            logger.info(f"[Escalation] Options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
+            logger.info(f"[Escalation] Options: ① Instant Chat | ② Schedule Callback")
             
             # Transition to escalation options state
             state_manager.transition(session_id, TransitionTrigger.SOLUTION_FAILED)
@@ -911,57 +911,40 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for option selections - CREATE TICKET
+        # Note: Create Ticket option removed - only using Instant Chat and Schedule Callback
+        # If user mentions "ticket", they'll be handled by agent via Instant Chat or Callback
         if "ticket" in message_lower or "option 3" in message_lower or message_lower == "3" or "support ticket" in message_lower or payload == "option_3":
-            logger.info(f"[Action] ✅ BUTTON CLICKED: Create Support Ticket (Option 3)")
-            logger.info(f"[Action] 🎫 SUPPORT TICKET CREATION INITIATED")
-            logger.info(f"[Action] Status: Collecting user details for support ticket...")
+            logger.info(f"[Action] 📞 Ticket request handled via Instant Chat or Callback")
+            # Redirect to Instant Chat as primary option
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
+            logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
+            logger.info(f"[Action] Status: Connecting visitor to live agent...")
             
-            # Transition to ticket collection state
-            state_manager.transition(session_id, TransitionTrigger.TICKET_REQUESTED)
+            # Transition to chat transfer state
+            state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
             
-            response_text = """Perfect! I'm creating a support ticket for you.
-
-Please provide:
-1. Your name
-2. Your email
-3. Your phone number
-4. Brief description of the issue
-
-A ticket will be created and you'll receive a confirmation email shortly. Our support team will follow up with you within 24 hours.
-
-Thank you for contacting Ace Cloud Hosting!"""
+            # Build conversation history
+            conversation_text = ""
+            for msg in history:
+                role = "Visitor" if msg.get('role') == 'user' else "Bot"
+                conversation_text += f"{role}: {msg.get('content', '')}\n"
+            
+            # Call SalesIQ API for chat transfer
+            api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+            logger.info(f"[SalesIQ] Chat transfer API result: {api_result}")
+            
+            response_text = "I'm connecting you with our support team now. They'll be able to create a ticket or assist you directly."
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            # Call Desk API to create support ticket
-            api_result = desk_api.create_support_ticket(
-                user_name="pending",
-                user_email="pending",
-                phone="pending",
-                description="Support ticket from chat",
-                issue_type="general",
-                conversation_history="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
-            )
-            
             if api_result.get("success"):
-                logger.info(f"[Action] ✓ SUPPORT TICKET CREATED SUCCESSFULLY")
-                logger.info(f"[Action] 🎫 Ticket ID: {api_result.get('ticket_id', 'Generated')}")
-                logger.info(f"[Action] Status: Closing chat and transferring to support queue")
-            else:
-                logger.warning(f"[Action] ✗ SUPPORT TICKET CREATION FAILED")
-                logger.warning(f"[Action] Error: {api_result.get('error', 'Unknown error')}")
+                logger.info(f"[Action] ✓ TRANSFER CONFIRMATION SENT")
             
-            logger.info(f"[Desk] Support ticket result: {api_result}")
-            
-            # Close chat in SalesIQ
-            close_result = salesiq_api.close_chat(session_id, "ticket_created")
-            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-            
-            # Clear conversation after ticket creation (auto-close)
+            # Clear conversation after transfer
             if session_id in conversations:
-                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Support Ticket Created")
+                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Agent Transfer")
                 metrics_collector.end_conversation(session_id, "escalated")
+                state_manager.end_session(session_id, ConversationState.ESCALATED)
                 del conversations[session_id]
             
             return {
@@ -995,7 +978,7 @@ Thank you for contacting Ace Cloud Hosting!"""
         if any(phrase in message_lower for phrase in agent_request_phrases):
             logger.info(f"[Escalation] 🆙 ESCALATION REQUESTED - User wants human agent")
             logger.info(f"[Escalation] Detected phrase in: {message_text[:100]}")
-            logger.info(f"[Escalation] Showing 3 options: ① Instant Chat | ② Schedule Callback | ③ Create Ticket")
+            logger.info(f"[Escalation] Showing 2 options: ① Instant Chat | ② Schedule Callback")
             
             # Transition to escalation options
             state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
