@@ -4,9 +4,15 @@ Simple Zoho API Integration - Working Version
 
 import os
 import logging
-from typing import Dict, Optional, Any
+import time
+from typing import Dict, Optional, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Configuration constants
+API_TIMEOUT = 10  # seconds
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
 
 
 class ZohoSalesIQAPI:
@@ -102,22 +108,52 @@ class ZohoSalesIQAPI:
             f"SalesIQ: Payload - app_id={effective_app_id}, dept={effective_department_id}, visitor_user_id={visitor_user_id}, visitor_email={visitor_email}"
         )
         
-        try:
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
-            logger.info(f"SalesIQ: Response Status: {response.status_code}")
-            logger.info(f"SalesIQ: Response Body: {response.text[:500]}")
-            
-            if response.status_code in [200, 201]:
-                try:
-                    data = response.json()
-                except Exception:
-                    data = {"raw": response.text}
-                return {"success": True, "endpoint": endpoint, "data": data}
-            else:
-                return {"success": False, "error": f"{response.status_code}", "details": response.text}
-        except Exception as e:
-            logger.error(f"SalesIQ: Visitor API exception: {str(e)}")
-            return {"success": False, "error": "exception", "details": str(e)}
+        # Retry logic for transient failures
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = requests.post(endpoint, json=payload, headers=headers, timeout=API_TIMEOUT)
+                logger.info(f"SalesIQ: Response Status: {response.status_code}")
+                logger.info(f"SalesIQ: Response Body: {response.text[:500]}")
+                
+                if response.status_code in [200, 201]:
+                    try:
+                        data = response.json()
+                    except Exception:
+                        data = {"raw": response.text}
+                    return {"success": True, "endpoint": endpoint, "data": data}
+                elif response.status_code in [429, 503]:  # Rate limit or service unavailable
+                    if attempt < MAX_RETRIES:
+                        retry_delay = RETRY_DELAY * attempt
+                        logger.warning(f"SalesIQ: Transient error {response.status_code}, retrying in {retry_delay}s (attempt {attempt}/{MAX_RETRIES})")
+                        time.sleep(retry_delay)
+                        continue
+                    return {"success": False, "error": f"{response.status_code}", "details": response.text, "retryable": True}
+                else:
+                    # Non-retryable HTTP error
+                    return {"success": False, "error": f"{response.status_code}", "details": response.text, "retryable": False}
+                    
+            except requests.exceptions.Timeout:
+                if attempt < MAX_RETRIES:
+                    logger.warning(f"SalesIQ: Timeout, retrying (attempt {attempt}/{MAX_RETRIES})")
+                    time.sleep(RETRY_DELAY)
+                    continue
+                logger.error(f"SalesIQ: Request timeout after {MAX_RETRIES} attempts")
+                return {"success": False, "error": "timeout", "details": f"Request timed out after {API_TIMEOUT}s", "retryable": True}
+                
+            except requests.exceptions.ConnectionError as e:
+                if attempt < MAX_RETRIES:
+                    logger.warning(f"SalesIQ: Connection error, retrying (attempt {attempt}/{MAX_RETRIES})")
+                    time.sleep(RETRY_DELAY)
+                    continue
+                logger.error(f"SalesIQ: Connection error: {str(e)}")
+                return {"success": False, "error": "connection_error", "details": str(e), "retryable": True}
+                
+            except Exception as e:
+                logger.error(f"SalesIQ: Unexpected error: {str(e)}", exc_info=True)
+                return {"success": False, "error": "exception", "details": str(e), "retryable": False}
+        
+        # Should not reach here, but safety fallback
+        return {"success": False, "error": "max_retries_exceeded", "details": "All retry attempts failed", "retryable": False}
     
     def close_chat(self, session_id: str, reason: str = "resolved") -> Dict:
         """Log chat closure"""
@@ -185,8 +221,9 @@ class ZohoDeskAPI:
         endpoint = f"{self.base_url}/departments"
         headers = self._headers()
         logger.info(f"Desk: GET {endpoint} with headers: Authorization=Zoho-oauthtoken {self.access_token[:20]}..., orgId={headers.get('orgId')}")
+        
         try:
-            resp = requests.get(endpoint, headers=headers, timeout=10)
+            resp = requests.get(endpoint, headers=headers, timeout=API_TIMEOUT)
             resp.raise_for_status()
             items = self._parse_data_list(resp.json())
             if not items:
@@ -197,13 +234,19 @@ class ZohoDeskAPI:
                 logger.info("Desk: Using default departmentId=%s", dept_id)
                 return str(dept_id)
             return None
+            
+        except requests.exceptions.Timeout:
+            logger.error("Desk: Request timeout fetching departments (>%ss)", API_TIMEOUT)
+            return None
+            
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if hasattr(e, 'response') else None
+            body = e.response.text if hasattr(e, 'response') else None
+            logger.error("Desk: Failed to fetch departments: HTTP %s - %s", status, body or "")
+            return None
+            
         except Exception as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            body = getattr(getattr(e, "response", None), "text", None)
-            if status is not None:
-                logger.error("Desk: Failed to fetch departments: HTTP %s - %s", status, body or "")
-            else:
-                logger.error("Desk: Failed to fetch departments: %s", str(e))
+            logger.error("Desk: Unexpected error fetching departments: %s", str(e), exc_info=True)
             return None
 
     def _find_contact_id_by_email(self, email: str) -> Optional[str]:
@@ -224,7 +267,7 @@ class ZohoDeskAPI:
 
         for endpoint in endpoints:
             try:
-                resp = requests.get(endpoint, headers=self._headers(), timeout=10)
+                resp = requests.get(endpoint, headers=self._headers(), timeout=API_TIMEOUT)
                 if resp.status_code == 404:
                     continue
                 resp.raise_for_status()
@@ -235,11 +278,19 @@ class ZohoDeskAPI:
                 contact_id = first.get("id") if isinstance(first, dict) else None
                 if contact_id:
                     return str(contact_id)
+                    
+            except requests.exceptions.Timeout:
+                logger.warning("Desk: Timeout during contact lookup (%s)", endpoint)
+                continue
+                
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code if hasattr(e, 'response') else None
+                body = e.response.text if hasattr(e, 'response') else None
+                logger.warning("Desk: Contact lookup failed (%s): HTTP %s - %s", endpoint, status, body or "")
+                continue
+                
             except Exception as e:
-                status = getattr(getattr(e, "response", None), "status_code", None)
-                body = getattr(getattr(e, "response", None), "text", None)
-                if status is not None:
-                    logger.warning("Desk: Contact lookup failed (%s): HTTP %s - %s", endpoint, status, body or "")
+                logger.warning("Desk: Unexpected error during contact lookup (%s): %s", endpoint, str(e))
                 continue
 
         return None
@@ -257,20 +308,26 @@ class ZohoDeskAPI:
             payload["phone"] = phone
 
         try:
-            resp = requests.post(endpoint, json=payload, headers=self._headers(), timeout=10)
+            resp = requests.post(endpoint, json=payload, headers=self._headers(), timeout=API_TIMEOUT)
             resp.raise_for_status()
             result = resp.json() if resp.content else {}
             contact_id = result.get("id") if isinstance(result, dict) else None
             if contact_id:
                 return str(contact_id)
             return None
+            
+        except requests.exceptions.Timeout:
+            logger.error("Desk: Timeout creating contact (>%ss)", API_TIMEOUT)
+            return None
+            
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if hasattr(e, 'response') else None
+            body = e.response.text if hasattr(e, 'response') else None
+            logger.error("Desk: Failed to create contact: HTTP %s - %s", status, body or "")
+            return None
+            
         except Exception as e:
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            body = getattr(getattr(e, "response", None), "text", None)
-            if status is not None:
-                logger.error("Desk: Failed to create contact: HTTP %s - %s", status, body or "")
-            else:
-                logger.error("Desk: Failed to create contact: %s", str(e))
+            logger.error("Desk: Unexpected error creating contact: %s", str(e), exc_info=True)
             return None
     
     def create_callback_ticket(
@@ -344,22 +401,57 @@ class ZohoDeskAPI:
         endpoint = f"{self.base_url}/calls"
         headers = self._headers()
         
-        try:
-            logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
-            logger.info(f"Desk: Token length: {len(self.access_token)}, OrgId: {self.org_id}")
-            logger.info(f"Desk: Payload: {payload}")
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
-            response.raise_for_status()
-            result = response.json()
-            logger.info(f"Desk: Callback call created - ID: {result.get('id')}")
-            return {"success": True, "call_id": result.get("id"), "web_url": result.get("webUrl")}
-        except requests.exceptions.HTTPError as e:
-            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
-            logger.error(f"Desk: HTTP Error creating callback - {e.response.status_code}: {error_detail}")
-            return {"success": False, "error": f"HTTP {e.response.status_code}: {error_detail}"}
-        except Exception as e:
-            logger.error(f"Desk: Error creating callback - {str(e)}")
-            return {"success": False, "error": str(e)}
+        logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
+        logger.info(f"Desk: Token length: {len(self.access_token)}, OrgId: {self.org_id}")
+        logger.info(f"Desk: Payload: {payload}")
+        
+        # Retry logic for transient failures
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = requests.post(endpoint, json=payload, headers=headers, timeout=API_TIMEOUT)
+                response.raise_for_status()
+                result = response.json()
+                logger.info(f"Desk: Callback call created - ID: {result.get('id')}")
+                return {"success": True, "call_id": result.get("id"), "web_url": result.get("webUrl")}
+                
+            except requests.exceptions.Timeout:
+                if attempt < MAX_RETRIES:
+                    retry_delay = RETRY_DELAY * attempt
+                    logger.warning(f"Desk: Timeout, retrying in {retry_delay}s (attempt {attempt}/{MAX_RETRIES})")
+                    time.sleep(retry_delay)
+                    continue
+                logger.error(f"Desk: Request timeout after {MAX_RETRIES} attempts")
+                return {"success": False, "error": "timeout", "details": f"Request timed out after {API_TIMEOUT}s", "retryable": True}
+                
+            except requests.exceptions.HTTPError as e:
+                status_code = e.response.status_code if hasattr(e, 'response') else None
+                error_detail = e.response.text if hasattr(e, 'response') else str(e)
+                
+                # Retry on transient errors
+                if status_code in [429, 503] and attempt < MAX_RETRIES:
+                    retry_delay = RETRY_DELAY * attempt
+                    logger.warning(f"Desk: HTTP {status_code}, retrying in {retry_delay}s (attempt {attempt}/{MAX_RETRIES})")
+                    time.sleep(retry_delay)
+                    continue
+                
+                logger.error(f"Desk: HTTP Error creating callback - {status_code}: {error_detail}")
+                return {"success": False, "error": f"HTTP {status_code}", "details": error_detail, "retryable": status_code in [429, 503]}
+                
+            except requests.exceptions.ConnectionError as e:
+                if attempt < MAX_RETRIES:
+                    retry_delay = RETRY_DELAY * attempt
+                    logger.warning(f"Desk: Connection error, retrying in {retry_delay}s (attempt {attempt}/{MAX_RETRIES})")
+                    time.sleep(retry_delay)
+                    continue
+                logger.error(f"Desk: Connection error: {str(e)}")
+                return {"success": False, "error": "connection_error", "details": str(e), "retryable": True}
+                
+            except Exception as e:
+                logger.error(f"Desk: Unexpected error creating callback: {str(e)}", exc_info=True)
+                return {"success": False, "error": "exception", "details": str(e), "retryable": False}
+        
+        # Should not reach here, but safety fallback
+        return {"success": False, "error": "max_retries_exceeded", "details": "All retry attempts failed", "retryable": False}
     
     def create_support_ticket(self, *args, **kwargs):
         logger.info("Desk: Support ticket creation simulated")

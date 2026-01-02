@@ -44,10 +44,11 @@ processed_data/*.jsonl
 SOP and KB Docs/
 sample_images/
 
-# Test and analysis scripts (not needed for deployment)
-test_*.py
-demo_*.py
-compare_*.py
+# Organize script (run once)
+organize_files.py
+
+# Keep only necessary project files
+# Do not commit: MdFiles/, postman/ as they are archived
 analyze_*.py
 inspect_*.py
 check_*.py
