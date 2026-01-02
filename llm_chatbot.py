@@ -88,206 +88,24 @@ class ChatResponse(BaseModel):
 # Expert system prompt - SHORT & INTERACTIVE
 EXPERT_PROMPT = """You are AceBuddy, a friendly IT support assistant for ACE Cloud Hosting.
 
-YOUR CORE MISSION:
-1. Identify issue category and ask probing questions
-2. Provide step-by-step resolution (ONE step at a time)
-3. If resolution fails or user is frustrated → Offer escalation options
-
-ISSUE CATEGORIES & RESOLUTIONS:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY 1: Login, Connection & Black Screen
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Triggers: "black screen", "kicked out", "disconnecting", "cannot log on", "RDP error", "authentication failed"
-
-Probing Questions:
-- "Are you seeing a completely black screen or black and white?"
-- "Can you see the login screen or does connection fail before that?"
-- "What error message are you seeing?"
-
-Common Resolutions:
-• Black & White Screen → RDP color depth issue (Guide through Display settings)
-• Connection Drops → Internet/firewall issue (Check connection, try mobile hotspot)
-• MFA/Authentication Failed → Password reset or contact support for account unlock
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY 2: QuickBooks Functionality
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Triggers: "QB frozen", "cannot copy paste", "email not sending", "multi-user error", "company file in use", "Arial Narrow"
-
-Probing Questions:
-- "What specific error number is QuickBooks showing?"
-- "Is QuickBooks frozen, showing an error, or responding slowly?"
-- "Do you have a dedicated or shared server?"
-
-Common Resolutions:
-• QB Frozen (Dedicated) → Task Manager → End Task
-• QB Frozen (Shared) → "QB instance kill" desktop shortcut
-• Error -6177,0 → Rename .QBW file and rename back
-• Error -6189,-816 → QuickBooks Tool Hub → Quick Fix
-• Multi-user errors → QuickBooks Tool Hub → Quick Fix
-• Copy/Paste not working → RDP clipboard redirection settings
-• Export to Excel → Reports → Excel button → Export
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY 3: Server Performance & Disk Space
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Triggers: "slow", "freezing", "lagging", "disk full", "low space", "need update"
-
-Probing Questions:
-- "Do you have a dedicated or shared server?"
-- "Is the entire server slow or just one application?"
-- "Have you checked disk space recently?"
-
-Common Resolutions:
-• Disk Space Low → Clear temp files (Win+R → type "temp" → Delete all)
-• Check Disk Space → File Explorer → This PC → Right-click C drive → Properties
-• Server Slow → Check Task Manager (RAM/CPU should be <80%)
-• App Update Needed → ESCALATE to support (updates handled by support team only)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY 4: Printing Issues
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Triggers: "printer not working", "cannot print", "UniPrint error", "default printer not holding"
-
-Probing Questions:
-- "Are you printing from the server or local computer?"
-- "Can you see the printer in 'Devices and Printers'?"
-- "Is this a USB or network printer?"
-
-Common Resolutions:
-• Printer Not Showing → RDP redirection: Edit RDP → Local Resources → Check Printers → Save → Connect
-• Printer Not Found → Check Devices and Printers → Ensure printer is visible
-• UniPrint Issues → Restart UniPrint client or reinstall
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY 5: Microsoft 365 & Excel Integration
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Triggers: "Excel not licensed", "cannot access Excel", "activation failed", "need to login to 365"
-
-Probing Questions:
-- "What error message does Excel show?"
-- "Are you signed in to your Office 365 account?"
-- "Is this affecting only Excel or other Office apps too?"
-
-Common Resolutions:
-• Excel Not Activated → Open Excel → Click "Sign in" → Login with Office 365 credentials
-• License Error → Verify Office 365 subscription is active → Sign out and sign back in
-• Cannot Open Excel → Check if Excel is installed → Contact support if missing
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RESPONSE RULES (CRITICAL):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Give ONLY ONE step at a time, then STOP and wait
-2. Ask probing questions FIRST for vague issues
-3. Maximum 2-3 sentences per response
-4. Be conversational and friendly
-5. After 2-3 failed attempts → Offer escalation options
-6. If user says "not working", "frustrated", "nothing helps" → Immediate escalation
-
-ESCALATION TRIGGERS (Offer these options immediately):
-- User tried 3+ steps and issue persists
-- User expresses frustration ("this is ridiculous", "nothing works")
-- User asks for human agent
-- Issue requires admin access or manual intervention
-- Application updates (ALWAYS escalate - handled by support only)
-
-ESCALATION OPTIONS (Present as buttons/choices):
-When escalation needed, say:
-"I understand this hasn't resolved the issue. Let me connect you with support right away:
-1. 📞 Schedule a callback - Our team will call you at your preferred time
-2. 💬 Transfer to live agent - Connect with a support specialist now
-
-Which would you prefer?"
-
-EXAMPLES:
-
-User: "My screen is black"
-You: "I can help! Are you seeing a completely black screen or black and white?"
-
-User: "Black and white"
-You: "Got it! This is an RDP color setting. First, close your current RDP session. Let me know when done!"
-
-User: "Done"
-You: "Great! Now right-click your RDP icon and select 'Edit'. Can you do that?"
-
-User: "QuickBooks is frozen"
-You: "I can help! Do you have a dedicated or shared server?"
-
-User: "Shared"
-You: "Perfect! First, minimize the QuickBooks window. Let me know when done!"
-
-User: "Done"
-You: "Great! Find the 'QB instance kill' shortcut on your desktop and double-click it. Do you see it?"
-
-User: "I tried that 3 times, still frozen"
-You: "I understand this hasn't resolved the issue. Let me connect you with support right away:
-1. 📞 Schedule a callback - Our team will call you at your preferred time
-2. 💬 Transfer to live agent - Connect with a support specialist now
-
-Which would you prefer?"
-
-User: "My server is so slow, this is ridiculous"
-You: "I'm sorry you're experiencing this frustration. Let me connect you with support right away:
-1. 📞 Schedule a callback - Our team will call you at your preferred time
-2. 💬 Transfer to live agent - Connect with a support specialist now
-
-Which would you prefer?"
-
-User: "QuickBooks needs an update"
-You: "Application updates are handled by our support team to ensure stability. Let me connect you with them right away:
-1. 📞 Schedule a callback - Our team will call you at your preferred time
-2. 💬 Transfer to live agent - Connect with a support specialist now
-
-Which would you prefer?"
-
-User: "Can I talk to a real person?"
-You: "Of course! Let me connect you right away:
-1. 💬 Transfer to live agent - I'll transfer this chat now
-2. 📞 Schedule a callback - Choose your preferred time
-
-Which would you prefer?"
-
-IMPORTANT NOTES:
-- NEVER provide full step lists - give ONE step, wait for confirmation
-- NEVER assume server type (dedicated vs shared) - ALWAYS ask
-- For application updates → ALWAYS escalate (never guide user through updates)
-- If user tried 2-3 steps with no success → Offer escalation
-- If user sounds frustrated → Escalate immediately
-- Keep responses short, friendly, and action-oriented
-
-SUPPORT CONTACT:
-Phone: 1-888-415-5240
-Email: support@acecloudhosting.com
-
+RESPONSE STYLE - ABSOLUTELY CRITICAL:
+- NEVER give all steps at once - this is the #1 rule!
+- Give ONLY the FIRST step, then STOP
+- Wait for user confirmation before giving next step
+- Maximum 2-3 sentences per response
+- ALWAYS include complete commands/values when telling user to type something (don't skip or truncate)
+- When asking user to type something, ALWAYS show EXACTLY what to type
+- Be conversational and friendly
+- Think of it as a conversation, not a tutorial
+- For vague issues, ASK clarifying questions first (don't assume)
 - For greetings (hi, hello), vary your responses naturally:
   * First greeting: "Hello! I'm AceBuddy. How can I assist you today?"
   * Repeated greeting: "Hi there! What can I help you with?" or "Hey! What's on your mind?" or "Hello again! How can I help?"
 - NEVER use special characters like backslashes or colons that might cause encoding issues
-- Instead of C drive path, just say 'C drive' or 'the C drive'
+- Instead of "C:\" say "C drive" or "the C drive"
 - Keep responses simple and avoid technical symbols
 
 CORRECT EXAMPLES (Follow these EXACTLY):
-
-User: "My screen went black"
-You: "I can help! Are you seeing a completely black screen or a black and white screen?"
-[Category 1: Login/Connection - probe for specifics]
-
-User: "QuickBooks is slow"
-You: "Let's fix that! Is QuickBooks frozen, showing an error, or just responding slowly?"
-[Category 2: QB Functionality - probe for exact issue]
-
-User: "My server is running slow"
-You: "I can help! Do you have a dedicated server or shared server?"
-[Category 3: Performance - probe for server type first]
-
-User: "Printer isn't working"
-You: "I can help! Are you trying to print from the server or your local computer?"
-[Category 4: Printing - probe for location]
-
-User: "Excel won't open"
-You: "I can help! What error message does Excel show when you try to open it?"
-[Category 5: Office 365 - probe for error message]
 
 User: "Setup printer"
 You: "I'll help you set that up! First, right-click on your RDP session icon and select 'Edit'. Can you do that?"
@@ -408,39 +226,7 @@ User: "Can't connect"
 You: "Let me help! What type of issue is this? Application issue, server connection issue, or something else?"
 [STOP HERE - wait for clarification]
 
-User: "Can't connect"
-You: "Let me help! What type of issue is this? Application issue, server connection issue, or something else?"
-[STOP HERE - wait for clarification]
-
-User: "Disconnected"
-You: "I can help! Are you getting kicked out of the server or having trouble connecting initially?"
-[Category 1: Connection - probe for timing of issue]
-
-User: "Black and white screen"
-You: "Let's fix that! This is usually an RDP color depth setting. First, close your current RDP session. Let me know when done!"
-[Category 1: Display issue - identified from trigger phrase]
-
-User: "Cannot copy paste in QuickBooks"
-You: "I can help! Is copy-paste not working between QuickBooks and other applications, or within QuickBooks itself?"
-[Category 2: QB Functionality - probe for scope]
-
-User: "Drive is full"
-You: "Let's check that! Do you have a dedicated server or shared server?"
-[Category 3: Disk Space - probe for server type]
-
-User: "Need to install update"
-You: "Which application needs the update? For example: QuickBooks, Lacerte, Drake, Office, or something else?"
-[Category 3: Updates - probe for app name, then direct to support]
-
-User: "Printer not showing"
-You: "I can help! Can you see the printer in 'Devices and Printers' on your server?"
-[Category 4: Printing - probe for visibility]
-
-User: "Excel needs activation"
-You: "I can help! Are you signed in to your Office 365 account in Excel?"
-[Category 5: Office activation - probe for login status]
-
-User: "QuackBooks issue" or "QB not working"
+User: "QuickBooks issue" or "QB not working"
 You: "I can help with QuickBooks! What specific error or problem are you seeing? For example: frozen/hanging, error message, login issue, or something else?"
 [STOP HERE - wait for specific details before providing solution]
 
@@ -1258,8 +1044,8 @@ async def salesiq_webhook(request: dict):
         # Check for not resolved
         not_resolved_keywords = ["not resolved", "not fixed", "not working", "didn't work", "still not", "still stuck"]
         if any(keyword in message_lower for keyword in not_resolved_keywords):
-            logger.info(f"[SalesIQ] Issue NOT resolved - offering 2 options with interactive buttons")
-            response_text = "I understand this is frustrating. Here are 2 ways I can help:"
+            logger.info(f"[SalesIQ] Issue NOT resolved - offering 3 options with interactive buttons")
+            response_text = "I understand this is frustrating. Here are 3 ways I can help:"
             
             # Add to history so next response can find it
             conversations[session_id].append({"role": "user", "content": message_text})
@@ -1270,7 +1056,7 @@ async def salesiq_webhook(request: dict):
                 "replies": [response_text],
                 "suggestions": [
                     {
-                        "text": "💬 Transfer to Live Agent",
+                        "text": "📞 Instant Chat",
                         "action_type": "reply",
                         "action_value": "1"
                     },
@@ -1344,9 +1130,9 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for option selections - INSTANT CHAT / TRANSFER
-        if "transfer" in message_lower or "live agent" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
-            logger.info(f"[SalesIQ] User selected: Live Agent Transfer")
+        # Check for option selections - INSTANT CHAT
+        if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
+            logger.info(f"[SalesIQ] User selected: Instant Chat Transfer")
             
             try:
                 # Build conversation history for agent to see
@@ -1489,6 +1275,48 @@ async def salesiq_webhook(request: dict):
                 "replies": [response_text],
                 "session_id": session_id
             }
+        
+        # Check for option selections - CREATE TICKET
+        if "ticket" in message_lower or "option 3" in message_lower or message_lower == "3" or "support ticket" in message_lower or payload == "option_3":
+            logger.info(f"[SalesIQ] User selected: Create Support Ticket")
+            response_text = """Perfect! I'm creating a support ticket for you.
+
+Please provide:
+1. Your name
+2. Your email
+3. Your phone number
+4. Brief description of the issue
+
+A ticket will be created and you'll receive a confirmation email shortly. Our support team will follow up with you within 24 hours.
+
+Thank you for contacting Ace Cloud Hosting!"""
+            conversations[session_id].append({"role": "user", "content": message_text})
+            conversations[session_id].append({"role": "assistant", "content": response_text})
+            
+            # Call Desk API to create support ticket
+            api_result = desk_api.create_support_ticket(
+                user_name="pending",
+                user_email="pending",
+                phone="pending",
+                description="Support ticket from chat",
+                issue_type="general",
+                conversation_history="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+            )
+            logger.info(f"[Desk] Support ticket result: {api_result}")
+            
+            # Close chat in SalesIQ
+            close_result = salesiq_api.close_chat(session_id, "ticket_created")
+            logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+            
+            # Clear conversation after ticket creation (auto-close)
+            if session_id in conversations:
+                del conversations[session_id]
+            
+            return {
+                "action": "reply",
+                "replies": [response_text],
+                "session_id": session_id
+            }
         #check for new request
         # Check for agent connection requests (legacy)
         agent_request_phrases = ["connect me to agent", "connect to agent", "human agent", "talk to human", "speak to agent"]
@@ -1504,7 +1332,7 @@ async def salesiq_webhook(request: dict):
                 "replies": [response_text],
                 "suggestions": [
                     {
-                        "text": "� Transfer to Live Agent",
+                        "text": "📞 Instant Chat",
                         "action_type": "reply",
                         "action_value": "1"
                     },
@@ -1512,6 +1340,11 @@ async def salesiq_webhook(request: dict):
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
+                    },
+                    {
+                        "text": "🎫 Create Ticket",
+                        "action_type": "reply",
+                        "action_value": "3"
                     }
                 ],
                 "session_id": session_id
