@@ -269,13 +269,13 @@ class ZohoDeskAPI:
 
         import requests
 
-        # Correct Zoho Desk API endpoint for contact search
-        # Format: GET /api/v1/contacts/search?email=xxx (use email parameter, not searchStr)
-        endpoint = f"{self.base_url}/contacts/search"
-        params = {"email": email}
+        # Try listing all contacts and finding the email (search endpoint has permission issues)
+        # This is less efficient but more reliable with limited API scopes
+        endpoint = f"{self.base_url}/contacts"
+        params = {"limit": 100}  # Get up to 100 contacts
 
         try:
-            logger.info(f"Desk: Searching contact with email: {email}")
+            logger.info(f"Desk: Searching for contact with email: {email}")
             resp = requests.get(endpoint, headers=self._headers(), params=params, timeout=API_TIMEOUT)
             
             if resp.status_code == 404:
