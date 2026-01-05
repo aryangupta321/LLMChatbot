@@ -139,45 +139,58 @@ class ZohoSalesIQAPI:
                 "error": str(e)
             }
     
-    def close_chat(self, session_id: str, reason: str = "resolved") -> Dict:
-        """Close chat session in SalesIQ"""
+    def close_chat(self, conversation_id: str, reason: str = "resolved") -> Dict:
+        """Close chat session in SalesIQ using v2 Conversations API
+        
+        Args:
+            conversation_id: The SalesIQ conversation ID
+            reason: Reason for closing (resolved, completed, callback_scheduled, etc.)
+        
+        API Documentation:
+            Endpoint: https://salesiq.zoho.com/api/v2/{screen_name}/conversations/{conversation_id}/close
+            OAuth Scope: SalesIQ.conversations.UPDATE
+        """
         
         if not self.enabled:
-            logger.info(f"SalesIQ API disabled - simulating chat closure for session {session_id}")
+            logger.info(f"SalesIQ API disabled - simulating chat closure for conversation {conversation_id}")
             return {
                 "success": True,
                 "simulated": True,
-                "message": f"Chat {session_id} closed (simulated)"
+                "message": f"Chat {conversation_id} closed (simulated)"
             }
         
         headers = {
-            "Authorization": f"Bearer {self.access_token}",
+            "Authorization": f"Zoho-oauthtoken {self.access_token}",
             "Content-Type": "application/json"
         }
         
-        payload = {
-            "status": "closed",
-            "reason": reason,
-            "closed_by": "bot"
-        }
+        # Build v2 API endpoint for closing conversation
+        # Format: https://salesiq.zoho.in/api/v2/{screen_name}/conversations/{conversation_id}/close
+        close_endpoint = f"https://salesiq.zoho.in/api/v2/{self.screen_name}/conversations/{conversation_id}/close"
         
         try:
-            logger.info(f"Closing SalesIQ chat session {session_id}")
-            response = requests.patch(
-                f"{self.base_url}/chats/{session_id}",
-                json=payload,
+            logger.info(f"Closing SalesIQ conversation {conversation_id} with reason: {reason}")
+            logger.info(f"Using Close API endpoint: {close_endpoint}")
+            
+            # POST request to close endpoint (no body needed per documentation)
+            response = requests.post(
+                close_endpoint,
                 headers=headers,
                 timeout=10
             )
             
-            if response.status_code in [200, 204]:
-                logger.info(f"SalesIQ chat {session_id} closed successfully")
+            logger.info(f"Close API Response - Status: {response.status_code}")
+            logger.info(f"Close API Response - Body: {response.text}")
+            
+            if response.status_code in [200, 201, 204]:
+                logger.info(f"✅ SalesIQ conversation {conversation_id} closed successfully")
                 return {
                     "success": True,
-                    "message": f"Chat {session_id} closed"
+                    "message": f"Chat {conversation_id} closed",
+                    "reason": reason
                 }
             else:
-                logger.error(f"SalesIQ close chat error: {response.status_code} - {response.text}")
+                logger.error(f"❌ SalesIQ close chat error: {response.status_code} - {response.text}")
                 return {
                     "success": False,
                     "error": f"API Error: {response.status_code}",

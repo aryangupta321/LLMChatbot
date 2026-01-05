@@ -155,9 +155,9 @@ class FallbackAPI:
         if past_messages:
             logger.info(f"[API] Fallback: Would transfer {len(past_messages)} messages")
         return {"success": True, "simulated": True, "message": "Chat transfer simulated"}
-    def close_chat(self, session_id, reason="resolved"):
-        logger.info(f"[API] Fallback: Simulating chat closure for {session_id}")
-        return {"success": True, "simulated": True, "message": "Chat closure simulated"}
+    def close_chat(self, conversation_id, reason="resolved"):
+        logger.info(f"[API] Fallback: Simulating chat closure for conversation {conversation_id}, reason: {reason}")
+        return {"success": True, "simulated": True, "message": f"Chat closure simulated - {reason}"}
     def create_callback_ticket(self, *args, **kwargs):
         logger.info("[API] Fallback: Simulating callback ticket creation")
         return {"success": True, "simulated": True, "ticket_number": "CB-SIM-001"}
