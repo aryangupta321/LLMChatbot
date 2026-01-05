@@ -31,9 +31,9 @@ class ZohoSalesIQAPI:
         # Enable only if required config exists
         self.enabled = bool(self.access_token and self.department_id and self.app_id)
         if self.enabled:
-            logger.info(f"SalesIQ Visitor API v1 configured - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
+            logger.info(f"SalesIQ Visitor API v1 ENABLED - department: {self.department_id}, app_id: {self.app_id}, screen: {self.screen_name}")
         else:
-            logger.warning(f"SalesIQ Visitor API not fully configured - token: {bool(self.access_token)}, dept: {bool(self.department_id)}, app_id: {bool(self.app_id)}, screen: {bool(self.screen_name)}")
+            logger.error(f"SalesIQ Visitor API DISABLED - Missing config! token: {bool(self.access_token)} (length: {len(self.access_token)}), dept: {bool(self.department_id)} ({self.department_id}), app_id: {bool(self.app_id)} ({self.app_id}), screen: {self.screen_name}")
     
     def create_chat_session(
         self,
@@ -270,9 +270,9 @@ class ZohoDeskAPI:
         import requests
 
         # Correct Zoho Desk API endpoint for contact search
-        # Format: GET /api/v1/contacts/search with searchStr parameter
+        # Format: GET /api/v1/contacts/search?email=xxx (use email parameter, not searchStr)
         endpoint = f"{self.base_url}/contacts/search"
-        params = {"searchStr": email}
+        params = {"email": email}
 
         try:
             logger.info(f"Desk: Searching contact with email: {email}")

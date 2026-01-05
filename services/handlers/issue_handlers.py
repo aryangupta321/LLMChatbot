@@ -29,12 +29,12 @@ class PasswordResetHandler(BaseHandler):
             return HandlerResponse(
                 text="Are you registered on the SelfCare portal (https://selfcare.acecloudhosting.com)?",
                 should_update_state=True,
-                new_state=ConversationState.CLARIFYING.value,
+                new_state=ConversationState.ISSUE_GATHERING.value,
                 metadata={"waiting_for": "selfcare_confirmation"}
             )
         
         # User confirms registration
-        if current_state == ConversationState.CLARIFYING.value:
+        if current_state == ConversationState.ISSUE_GATHERING.value:
             message_lower = message.lower()
             
             if "yes" in message_lower or "registered" in message_lower:
