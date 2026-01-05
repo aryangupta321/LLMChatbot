@@ -20,6 +20,9 @@ from services.handlers.issue_handlers import (
     AppUpdateHandler,
     ContactRequestHandler
 )
+from services.handlers.collection_handlers import (
+    CallbackCollectionHandler
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,9 @@ class HandlerRegistry:
         self.register(InstantChatHandler())
         self.register(CallbackHandler())
         self.register(TicketHandler())
+        
+        # Collection handlers (priority 10)
+        self.register(CallbackCollectionHandler())
         
         # Issue-specific handlers (priority 11-20)
         self.register(ContactRequestHandler())

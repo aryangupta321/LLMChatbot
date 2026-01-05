@@ -1335,13 +1335,20 @@ async def salesiq_webhook(request: dict):
             if metadata.get("action") == "schedule_callback":
                 visitor_name = metadata.get("visitor_name", "User")
                 visitor_email = metadata.get("visitor_email", "support@acecloudhosting.com")
+                phone = metadata.get("phone")
+                preferred_time = metadata.get("preferred_time")
                 
-                # Extract phone from message or conversation
-                # For now, using fallback - can enhance later
+                # Build conversation history text
+                conversation_text = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+                
+                logger.info(f"[Callback] Creating callback: phone={phone}, time={preferred_time}")
+                
                 api_result = desk_api.create_callback_ticket(
-                    visitor_name, visitor_email, "pending",
-                    "User requested callback", "Callback Request",
-                    conversation_text="\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+                    visitor_email=visitor_email,
+                    visitor_name=visitor_name,
+                    conversation_history=conversation_text,
+                    preferred_time=preferred_time,
+                    phone=phone
                 )
                 logger.info(f"[Handler] Callback API result: {api_result}")
                 

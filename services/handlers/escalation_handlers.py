@@ -190,11 +190,10 @@ class CallbackHandler(BaseHandler):
         
         response_text = (
             f"Perfect! I'll schedule a callback for you.\n\n"
-            f"Name: {visitor_name}\n"
-            f"Email: {visitor_email}\n"
-            f"Phone: [Please provide your phone number]\n\n"
-            f"Our team will call you back within 2 hours during business hours (9 AM - 6 PM EST).\n\n"
-            f"Thank you for contacting Ace Cloud Hosting!"
+            f"Please provide:\n"
+            f"1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
+            f"2. Your phone number\n\n"
+            f"Example: Time: 9pm tomorrow\\nPhone: 1234567890"
         )
         
         return HandlerResponse(
@@ -202,7 +201,6 @@ class CallbackHandler(BaseHandler):
             should_update_state=True,
             new_state=ConversationState.CALLBACK_COLLECTION.value,
             metadata={
-                "action": "schedule_callback",
                 "visitor_name": visitor_name,
                 "visitor_email": visitor_email
             }
