@@ -260,60 +260,92 @@ class ZohoDeskAPI:
 
         import requests
 
-        endpoints = [
-            f"{self.base_url}/contacts/search?email={email}",
-            f"{self.base_url}/contacts?email={email}",
-        ]
+        # Correct Zoho Desk API endpoint for contact search
+        # Format: GET /api/v1/contacts/search with searchStr parameter
+        endpoint = f"{self.base_url}/contacts/search"
+        params = {"searchStr": email}
 
-        for endpoint in endpoints:
-            try:
-                resp = requests.get(endpoint, headers=self._headers(), timeout=API_TIMEOUT)
-                if resp.status_code == 404:
-                    continue
-                resp.raise_for_status()
-                items = self._parse_data_list(resp.json())
-                if not items:
-                    continue
-                first = items[0]
-                contact_id = first.get("id") if isinstance(first, dict) else None
-                if contact_id:
-                    return str(contact_id)
+        try:
+            logger.info(f"Desk: Searching contact with email: {email}")
+            resp = requests.get(endpoint, headers=self._headers(), params=params, timeout=API_TIMEOUT)
+            
+            if resp.status_code == 404:
+                logger.info(f"Desk: No contact found for email: {email}")
+                return None
+                
+            resp.raise_for_status()
+            items = self._parse_data_list(resp.json())
+            
+            if not items:
+                logger.info(f"Desk: Contact search returned empty results for: {email}")
+                return None
+                
+            # Find exact email match from results
+            for item in items:
+                if isinstance(item, dict) and item.get("email", "").lower() == email.lower():
+                    contact_id = item.get("id")
+                    if contact_id:
+                        logger.info(f"Desk: Found contact ID {contact_id} for email: {email}")
+                        return str(contact_id)
+            
+            logger.info(f"Desk: No exact email match found in search results for: {email}")
+            return None
                     
-            except requests.exceptions.Timeout:
-                logger.warning("Desk: Timeout during contact lookup (%s)", endpoint)
-                continue
-                
-            except requests.exceptions.HTTPError as e:
-                status = e.response.status_code if hasattr(e, 'response') else None
-                body = e.response.text if hasattr(e, 'response') else None
-                logger.warning("Desk: Contact lookup failed (%s): HTTP %s - %s", endpoint, status, body or "")
-                continue
-                
-            except Exception as e:
-                logger.warning("Desk: Unexpected error during contact lookup (%s): %s", endpoint, str(e))
-                continue
-
-        return None
+        except requests.exceptions.Timeout:
+            logger.warning("Desk: Timeout during contact lookup for email: %s", email)
+            return None
+            
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if hasattr(e, 'response') else None
+            body = e.response.text if hasattr(e, 'response') else None
+            logger.warning("Desk: Contact lookup failed: HTTP %s - %s", status, body or "")
+            return None
+            
+        except Exception as e:
+            logger.warning("Desk: Unexpected error during contact lookup: %s", str(e))
+            return None
 
     def _create_contact(self, email: str, name: str, phone: Optional[str] = None) -> Optional[str]:
+        """Create a new contact in Zoho Desk
+        
+        API: POST /api/v1/contacts
+        Required fields: lastName, email (or phone)
+        """
         import requests
 
         endpoint = f"{self.base_url}/contacts"
-        last_name = (name or "").strip() or (email.split("@")[0] if email else "Customer")
+        
+        # Split name into first and last name
+        name_parts = (name or "").strip().split(None, 1) if name else []
+        first_name = name_parts[0] if len(name_parts) > 0 else ""
+        last_name = name_parts[1] if len(name_parts) > 1 else (email.split("@")[0] if email else "Customer")
+        
+        # If no name provided, use email prefix
+        if not first_name and not last_name:
+            last_name = email.split("@")[0] if email else "Customer"
+        
         payload: Dict[str, Any] = {
-            "lastName": last_name,
-            "email": email,
+            "lastName": last_name or "Customer",
+            "email": email
         }
+        
+        if first_name:
+            payload["firstName"] = first_name
+            
         if phone:
             payload["phone"] = phone
 
         try:
+            logger.info(f"Desk: Creating contact for email: {email}")
             resp = requests.post(endpoint, json=payload, headers=self._headers(), timeout=API_TIMEOUT)
             resp.raise_for_status()
             result = resp.json() if resp.content else {}
             contact_id = result.get("id") if isinstance(result, dict) else None
             if contact_id:
+                logger.info(f"Desk: Created contact with ID: {contact_id}")
                 return str(contact_id)
+            
+            logger.error(f"Desk: Contact creation response missing ID: {result}")
             return None
             
         except requests.exceptions.Timeout:
