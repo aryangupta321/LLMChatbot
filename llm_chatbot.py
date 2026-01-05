@@ -150,8 +150,10 @@ conversations: Dict[str, List[Dict]] = {}
 class FallbackAPI:
     def __init__(self):
         self.enabled = False
-    def create_chat_session(self, visitor_id, conversation_history):
+    def create_chat_session(self, visitor_id, conversation_history=None, past_messages=None):
         logger.info(f"[API] Fallback: Simulating chat transfer for {visitor_id}")
+        if past_messages:
+            logger.info(f"[API] Fallback: Would transfer {len(past_messages)} messages")
         return {"success": True, "simulated": True, "message": "Chat transfer simulated"}
     def close_chat(self, session_id, reason="resolved"):
         logger.info(f"[API] Fallback: Simulating chat closure for {session_id}")
@@ -248,9 +250,54 @@ def load_expert_prompt() -> str:
     except FileNotFoundError:
         logger.error(f"Prompt file not found at {prompt_path}. Using fallback prompt.")
         return "You are AceBuddy, a friendly IT support assistant for ACE Cloud Hosting."
-    except Exception as e:
-        logger.error(f"Error loading prompt file: {str(e)}. Using fallback prompt.")
-        return "You are AceBuddy, a friendly IT support assistant for ACE Cloud Hosting."
+
+def build_past_messages(history: List[Dict]) -> List[Dict]:
+    """Build past_messages array for SalesIQ API according to their format
+    
+    Args:
+        history: Conversation history in OpenAI format [{"role": "user/assistant", "content": "..."}]
+    
+    Returns:
+        List of message dicts in SalesIQ format:
+        [{"sender_type": "visitor/bot", "sender_name": "...", "time": timestamp, "text": "..."}]
+    """
+    from datetime import datetime, timezone
+    import time
+    
+    past_messages = []
+    
+    for idx, msg in enumerate(history):
+        role = msg.get('role', 'user')
+        content = msg.get('content', '')
+        
+        # Skip system messages
+        if role == 'system':
+            continue
+        
+        # Map role to SalesIQ sender_type
+        if role == 'user':
+            sender_type = "visitor"
+            sender_name = "Customer"
+        elif role == 'assistant':
+            sender_type = "bot"
+            sender_name = "AceBuddy"
+        else:
+            continue
+        
+        # Generate timestamp (current time minus message age for sequential ordering)
+        # More recent messages = higher timestamp
+        timestamp_ms = int((time.time() - (len(history) - idx) * 5) * 1000)
+        
+        message_obj = {
+            "sender_type": sender_type,
+            "sender_name": sender_name,
+            "time": timestamp_ms,
+            "text": content
+        }
+        
+        past_messages.append(message_obj)
+    
+    return past_messages
 
 # Load prompt on startup
 EXPERT_PROMPT = load_expert_prompt()
@@ -578,14 +625,23 @@ async def salesiq_webhook(request: dict):
             last_bot_message = history[-1].get('content', '') if history[-1].get('role') == 'assistant' else ''
             if 'human agent' in last_bot_message.lower():
                 logger.info(f"[SalesIQ] User requested human agent - initiating transfer")
-                # Build conversation history for agent to see
+                
+                # Build past_messages in SalesIQ format (message-by-message)
+                past_messages = build_past_messages(history)
+                
+                # Build legacy text format as fallback
                 conversation_text = ""
                 for msg in history:
                     role = "User" if msg.get('role') == 'user' else "Bot"
                     conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
-                # Call SalesIQ API to create chat session
-                api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+                # Call SalesIQ API with structured message history
+                logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent")
+                api_result = salesiq_api.create_chat_session(
+                    session_id, 
+                    conversation_history=conversation_text,
+                    past_messages=past_messages
+                )
                 logger.info(f"[SalesIQ] API result: {api_result}")
                 
                 # SalesIQ only supports "action": "reply" - transfer happens via API
@@ -769,7 +825,10 @@ async def salesiq_webhook(request: dict):
             logger.info(f"[Action] Status: Connecting visitor to live agent...")
             
             try:
-                # Build conversation history for agent to see
+                # Build past_messages in SalesIQ format (message-by-message)
+                past_messages = build_past_messages(history)
+                
+                # Build conversation history text as fallback
                 conversation_text = ""
                 for msg in history:
                     role = "User" if msg.get('role') == 'user' else "Bot"
@@ -785,14 +844,13 @@ async def salesiq_webhook(request: dict):
                 
                 # Call SalesIQ API (Visitor API) to create conversation and route to agent
                 logger.info(f"[SalesIQ] Calling create_chat_session API with overrides app_id={override_app_id}, dept={override_department_id}, visitor_email={visitor_email}")
+                logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent (message-by-message)")
                 
                 # Pass visitor email as user_id (most reliable unique identifier per API docs)
                 api_result = salesiq_api.create_chat_session(
                     visitor_email,  # Use email as unique user_id per API documentation
-                    conversation_text,
-                    app_id=override_app_id,
-                    department_id=str(override_department_id) if override_department_id else None,
-                    visitor_info=visitor
+                    conversation_history=conversation_text,
+                    past_messages=past_messages
                 )
                 logger.info(f"[SalesIQ] API result: {api_result}")
             except Exception as api_error:
@@ -936,14 +994,22 @@ async def salesiq_webhook(request: dict):
             # Transition to chat transfer state
             state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
             
-            # Build conversation history
+            # Build past_messages in SalesIQ format (message-by-message)
+            past_messages = build_past_messages(history)
+            
+            # Build conversation history text as fallback
             conversation_text = ""
             for msg in history:
                 role = "Visitor" if msg.get('role') == 'user' else "Bot"
                 conversation_text += f"{role}: {msg.get('content', '')}\n"
             
-            # Call SalesIQ API for chat transfer
-            api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+            # Call SalesIQ API for chat transfer with structured history
+            logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent")
+            api_result = salesiq_api.create_chat_session(
+                session_id, 
+                conversation_history=conversation_text,
+                past_messages=past_messages
+            )
             logger.info(f"[SalesIQ] Chat transfer API result: {api_result}")
             
             response_text = "I'm connecting you with our support team now. They'll be able to create a ticket or assist you directly."
@@ -1227,14 +1293,22 @@ async def salesiq_webhook(request: dict):
             
             # Check if we need to transfer
             if metadata.get("action") == "transfer_to_agent":
-                # Build conversation history
+                # Build past_messages in SalesIQ format (message-by-message)
+                past_messages = build_past_messages(history)
+                
+                # Build conversation history text as fallback
                 conversation_text = ""
                 for msg in history:
                     role = "User" if msg.get('role') == 'user' else "Bot"
                     conversation_text += f"{role}: {msg.get('content', '')}\n"
                 
-                # Call SalesIQ API
-                api_result = salesiq_api.create_chat_session(session_id, conversation_text)
+                # Call SalesIQ API with structured history
+                logger.info(f"[Handler] Transferring {len(past_messages)} messages to agent")
+                api_result = salesiq_api.create_chat_session(
+                    session_id, 
+                    conversation_history=conversation_text,
+                    past_messages=past_messages
+                )
                 logger.info(f"[Handler] Transfer API result: {api_result}")
                 
                 if session_id in conversations:
@@ -1458,12 +1532,27 @@ async def test_salesiq_transfer_get():
     try:
         # Use email as user_id (most reliable per API docs) instead of session ID
         test_user_id = "vishal.dharan@acecloudhosting.com"
+        
+        # Build sample conversation history
+        sample_history = [
+            {"role": "user", "content": "Hi, I need help with my disk space"},
+            {"role": "assistant", "content": "I can help with that! Let me connect you with our team."}
+        ]
+        past_messages = build_past_messages(sample_history)
+        
         conversation_text = "Test transfer from GET endpoint"
         logger.info(f"[Test] Initiating SalesIQ Visitor API transfer (GET) with user_id={test_user_id}")
-        result = salesiq_api.create_chat_session(test_user_id, conversation_text)
+        logger.info(f"[Test] Including {len(past_messages)} sample messages")
+        
+        result = salesiq_api.create_chat_session(
+            test_user_id, 
+            conversation_history=conversation_text,
+            past_messages=past_messages
+        )
         return {
             "user_id": test_user_id,
-            "result": result
+            "result": result,
+            "past_messages_sent": len(past_messages)
         }
     except Exception as e:
         logger.error(f"[Test] SalesIQ transfer GET failed: {str(e)}")
@@ -1487,25 +1576,35 @@ async def test_salesiq_transfer_post(payload: Dict):
     try:
         # Use email as user_id (more reliable than session IDs)
         visitor_user_id = str(payload.get("visitor_user_id") or "vishal.dharan@acecloudhosting.com")
+        
+        # Extract conversation or build from history
         conversation_text = str(payload.get("conversation") or "Test transfer from POST endpoint")
-        app_id = payload.get("app_id")
-        department_id = payload.get("department_id")
-        visitor_info = payload.get("visitor")
-        custom_wait_time = payload.get("custom_wait_time")
+        
+        # Build past_messages if history provided
+        history = payload.get("history", [])
+        past_messages = None
+        if history and isinstance(history, list):
+            past_messages = build_past_messages(history)
+        else:
+            # Create sample history if none provided
+            past_messages = build_past_messages([
+                {"role": "user", "content": "I need help with QuickBooks"},
+                {"role": "assistant", "content": "I'll connect you with our support team."}
+            ])
 
         logger.info(
-            f"[Test] Initiating SalesIQ Visitor API transfer (POST) for user_id={visitor_user_id} with app_id={app_id}, dept={department_id}"
+            f"[Test] Initiating SalesIQ Visitor API transfer (POST) for user_id={visitor_user_id}"
         )
+        logger.info(f"[Test] Including {len(past_messages)} messages in transfer")
+        
         result = salesiq_api.create_chat_session(
-            visitor_user_id,  # Use as unique user_id per API documentation
-            conversation_text,
-            app_id=app_id,
-            department_id=str(department_id) if department_id is not None else None,
-            visitor_info=visitor_info,
-            custom_wait_time=custom_wait_time,
+            visitor_user_id,
+            conversation_history=conversation_text,
+            past_messages=past_messages
         )
         return {
             "user_id": visitor_user_id,
+            "past_messages_sent": len(past_messages),
             "result": result
         }
     except Exception as e:

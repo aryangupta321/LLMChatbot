@@ -45,8 +45,14 @@ class ZohoSalesIQAPI:
             logger.error(f"Error initializing SalesIQ API: {str(e)}")
             self.enabled = False
     
-    def create_chat_session(self, visitor_id: str, conversation_history: str) -> Dict:
-        """Create new conversation using official SalesIQ Visitor API"""
+    def create_chat_session(self, visitor_id: str, conversation_history: str = None, past_messages: list = None) -> Dict:
+        """Create new conversation using official SalesIQ Visitor API with full message history
+        
+        Args:
+            visitor_id: Unique visitor identifier
+            conversation_history: Legacy text format (deprecated)
+            past_messages: List of message dicts with sender_type, sender_name, time, text
+        """
         
         if not self.enabled:
             logger.info(f"SalesIQ API disabled - simulating transfer for visitor {visitor_id}")
@@ -72,9 +78,14 @@ class ZohoSalesIQAPI:
                 "page_title": "Support Chat"
             },
             "app_id": self.app_id,
-            "question": conversation_history,
+            "question": conversation_history or "Customer requesting assistance",
             "department_id": self.department_id
         }
+        
+        # Add past_messages if provided (message-by-message history)
+        if past_messages and isinstance(past_messages, list) and len(past_messages) > 0:
+            payload["past_messages"] = past_messages
+            logger.info(f"SalesIQ: Including {len(past_messages)} past messages in transfer")
         
         logger.info(f"SalesIQ Visitor API request: visitor_id={visitor_id}, department_id={self.department_id}, app_id={self.app_id}")
         
