@@ -43,12 +43,16 @@ class ZohoSalesIQAPI:
         department_id: str | None = None,
         visitor_info: Dict | None = None,
         custom_wait_time: int | None = None,
+        past_messages: list | None = None,
     ) -> Dict:
         """Create a conversation via Visitor API to route to an agent.
         Allows overriding app_id/department_id/visitor_info from inbound webhook payload.
         
         IMPORTANT: Cannot use bot preview visitor IDs (botpreview_...).
         Must use real visitor IDs from actual chat widget interactions.
+        
+        Args:
+            past_messages: Optional list of message dicts in SalesIQ format for message-by-message history
         """
         
         if not self.enabled:
@@ -101,6 +105,11 @@ class ZohoSalesIQAPI:
         # Add optional custom_wait_time if provided
         if custom_wait_time is not None:
             payload["custom_wait_time"] = custom_wait_time
+        
+        # Add past_messages for message-by-message history transfer if provided
+        if past_messages:
+            payload["past_messages"] = past_messages
+            logger.info(f"SalesIQ: Including {len(past_messages)} past messages for message-by-message display")
         
         endpoint = f"{self.base_url}/conversations"
         logger.info(f"SalesIQ: Visitor API v1 call - POST {endpoint}")

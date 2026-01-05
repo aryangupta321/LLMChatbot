@@ -656,24 +656,38 @@ async def salesiq_webhook(request: dict):
                     "session_id": session_id
                 }
         
-        # Check for issue resolution - COMPREHENSIVE AUTO-CLOSE
+        # Check for issue resolution - CONTEXTUAL AUTO-CLOSE
+        # Only trigger if the user explicitly confirms the issue is RESOLVED/FIXED/WORKING
         resolution_keywords = [
-            # Direct resolution confirmations
+            # Direct resolution confirmations ONLY (removed standalone acknowledgments)
             "resolved", "fixed", "working now", "solved", "all set", "working fine",
             "works now", "problem solved", "issue fixed", "issue resolved",
-            
-            # Satisfaction expressions
-            "perfect", "great", "excellent", "wonderful", "amazing", "awesome",
             "that worked", "that works", "that helped", "that fixed it",
-            "it works", "it's working", "its working", "all good", "working good",
-            
-            # Completion phrases
-            "done", "sorted", "taken care of", "all clear", "no more issues",
-            "no problem now", "back to normal", "functioning", "operational"
+            "it works", "it's working", "its working", "no more issues",
+            "no problem now", "back to normal"
         ]
-        if any(keyword in message_lower for keyword in resolution_keywords):
+        
+        # Check if user message contains explicit resolution confirmation
+        has_resolution_keyword = any(keyword in message_lower for keyword in resolution_keywords)
+        
+        # Get last bot message to check if we offered closure
+        last_bot_message = ""
+        if len(conversations[session_id]) >= 2:
+            last_bot_message = conversations[session_id][-1].get('content', '').lower()
+        
+        # Closure offer indicators in bot's last message
+        bot_offered_closure = any(phrase in last_bot_message for phrase in [
+            "anything else", "is there anything else", "further assistance",
+            "help you with anything", "need help with", "can i help",
+            "issue resolved", "problem resolved", "working now"
+        ])
+        
+        # Only auto-close if BOTH:
+        # 1. User explicitly confirms resolution (not just "okay" or "perfect")
+        # 2. OR bot previously offered closure and user says positive acknowledgment
+        if has_resolution_keyword:
             logger.info(f"[Resolution] ✓ ISSUE RESOLVED")
-            logger.info(f"[Resolution] Reason: User confirmed fix worked - '{message_text[:50]}'")
+            logger.info(f"[Resolution] Reason: User explicitly confirmed - '{message_text[:50]}'")
             logger.info(f"[Resolution] Action: Auto-closing chat session")
             
             # Transition to resolved state
