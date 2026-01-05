@@ -264,112 +264,19 @@ class ZohoDeskAPI:
             logger.info(f"Desk: Using default contactId={self.default_contact_id}")
             return str(self.default_contact_id)
         
-        if not email:
-            return None
-
-        import requests
-
-        # Try listing all contacts and finding the email (search endpoint has permission issues)
-        # This is less efficient but more reliable with limited API scopes
-        endpoint = f"{self.base_url}/contacts"
-        params = {"limit": 100}  # Get up to 100 contacts
-
-        try:
-            logger.info(f"Desk: Searching for contact with email: {email}")
-            resp = requests.get(endpoint, headers=self._headers(), params=params, timeout=API_TIMEOUT)
-            
-            if resp.status_code == 404:
-                logger.info(f"Desk: No contact found for email: {email}")
-                return None
-                
-            resp.raise_for_status()
-            items = self._parse_data_list(resp.json())
-            
-            if not items:
-                logger.info(f"Desk: Contact search returned empty results for: {email}")
-                return None
-                
-            # Find exact email match from results
-            for item in items:
-                if isinstance(item, dict) and item.get("email", "").lower() == email.lower():
-                    contact_id = item.get("id")
-                    if contact_id:
-                        logger.info(f"Desk: Found contact ID {contact_id} for email: {email}")
-                        return str(contact_id)
-            
-            logger.info(f"Desk: No exact email match found in search results for: {email}")
-            return None
-                    
-        except requests.exceptions.Timeout:
-            logger.warning("Desk: Timeout during contact lookup for email: %s", email)
-            return None
-            
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if hasattr(e, 'response') else None
-            body = e.response.text if hasattr(e, 'response') else None
-            logger.warning("Desk: Contact lookup failed: HTTP %s - %s", status, body or "")
-            return None
-            
-        except Exception as e:
-            logger.warning("Desk: Unexpected error during contact lookup: %s", str(e))
-            return None
+        # Contact API has permission issues - skip lookup
+        # Set DESK_CONTACT_ID env var to use a default contact
+        logger.warning(f"Desk: No default contact ID set. Set DESK_CONTACT_ID environment variable to skip contact lookup.")
+        return None
 
     def _create_contact(self, email: str, name: str, phone: Optional[str] = None) -> Optional[str]:
         """Create a new contact in Zoho Desk
         
-        API: POST /api/v1/contacts
-        Required fields: lastName, email (or phone)
+        NOTE: Contact creation requires special Desk API permissions.
+        If you get 400/403 errors, set DESK_CONTACT_ID environment variable instead.
         """
-        import requests
-
-        endpoint = f"{self.base_url}/contacts"
-        
-        # Split name into first and last name
-        name_parts = (name or "").strip().split(None, 1) if name else []
-        first_name = name_parts[0] if len(name_parts) > 0 else ""
-        last_name = name_parts[1] if len(name_parts) > 1 else (email.split("@")[0] if email else "Customer")
-        
-        # If no name provided, use email prefix
-        if not first_name and not last_name:
-            last_name = email.split("@")[0] if email else "Customer"
-        
-        payload: Dict[str, Any] = {
-            "lastName": last_name or "Customer",
-            "email": email
-        }
-        
-        if first_name:
-            payload["firstName"] = first_name
-            
-        if phone:
-            payload["phone"] = phone
-
-        try:
-            logger.info(f"Desk: Creating contact for email: {email}")
-            resp = requests.post(endpoint, json=payload, headers=self._headers(), timeout=API_TIMEOUT)
-            resp.raise_for_status()
-            result = resp.json() if resp.content else {}
-            contact_id = result.get("id") if isinstance(result, dict) else None
-            if contact_id:
-                logger.info(f"Desk: Created contact with ID: {contact_id}")
-                return str(contact_id)
-            
-            logger.error(f"Desk: Contact creation response missing ID: {result}")
-            return None
-            
-        except requests.exceptions.Timeout:
-            logger.error("Desk: Timeout creating contact (>%ss)", API_TIMEOUT)
-            return None
-            
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if hasattr(e, 'response') else None
-            body = e.response.text if hasattr(e, 'response') else None
-            logger.error("Desk: Failed to create contact: HTTP %s - %s", status, body or "")
-            return None
-            
-        except Exception as e:
-            logger.error("Desk: Unexpected error creating contact: %s", str(e), exc_info=True)
-            return None
+        logger.warning(f"Desk: Cannot create contact - API permission issue. Set DESK_CONTACT_ID env var with a default contact ID.")
+        return None
     
     def create_callback_ticket(
         self,
@@ -407,14 +314,13 @@ class ZohoDeskAPI:
             return {
                 "success": False,
                 "error": "missing_department_id",
-                "details": "Desk departmentId is required. Set DESK_DEPARTMENT_ID. If /departments returns 403, re-generate Desk token with department read scope and ensure DESK_BASE_URL is correct.",
+                "details": "Desk departmentId is required. Set DESK_DEPARTMENT_ID environment variable.",
             }
+        
+        # IMPORTANT: Contact is optional - we can create call without it
+        # If contact is missing, we'll include contact details in description instead
         if not contact_id:
-            return {
-                "success": False,
-                "error": "missing_contact_id",
-                "details": "Desk contactId is required. If /contacts returns 403, re-generate Desk token with Desk.contacts.READ + Desk.contacts.CREATE (or allow contacts access for the portal).",
-            }
+            logger.warning(f"Desk: No contact ID available. Creating call without contact. Set DESK_CONTACT_ID env var to fix this.")
         
         # Use current time as start time (ISO 8601)
         start_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -426,10 +332,9 @@ class ZohoDeskAPI:
             details_block += f"\nPhone: {phone}"
 
         # Limit description to avoid 400 errors (max ~500 chars recommended)
-        description = f"Callback requested by {visitor_name}\nEmail: {visitor_email}{details_block}"
+        description = f"Callback requested by {visitor_name}\nEmail: {visitor_email}{details_block}\n\nConversation:\n{conversation_history[:300] if conversation_history else 'No history'}"
         
         payload = {
-            "contactId": str(contact_id),
             "departmentId": str(department_id),
             "subject": f"Callback Request - {visitor_name}",
             "description": description,
@@ -438,6 +343,13 @@ class ZohoDeskAPI:
             "duration": 0,
             "status": "In Progress",
         }
+        
+        # Add contactId only if available (it's marked as required in API but we'll try without)
+        if contact_id:
+            payload["contactId"] = str(contact_id)
+        else:
+            # If no contact, add email/name in description for manual follow-up
+            logger.warning(f"Desk: Creating call without contactId - agent will need to manually associate contact")
         
         endpoint = f"{self.base_url}/calls"
         headers = self._headers()
