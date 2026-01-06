@@ -146,6 +146,10 @@ logger.info(f"HandlerRegistry ready with {len(handler_registry.handlers)} handle
 
 conversations: Dict[str, List[Dict]] = {}
 
+# Store SalesIQ conversation IDs for API operations (close, transfer, etc.)
+# Maps internal session_id -> salesiq_conversation_id
+conversation_id_map: Dict[str, str] = {}
+
 # Fallback API class for when real API is not available
 class FallbackAPI:
     def __init__(self):
@@ -491,6 +495,29 @@ async def salesiq_webhook_test():
         "note": "POST requests will be processed as chat messages"
     }
 
+@app.get("/debug/conversation-ids")
+async def get_conversation_ids():
+    """Debug endpoint to view all stored SalesIQ conversation IDs"""
+    screen_name = os.getenv('SALESIQ_SCREEN_NAME', 'rtdsportal')
+    
+    id_summary = []
+    for session_id, conv_id in conversation_id_map.items():
+        close_url = f"https://salesiq.zohopublic.in/api/v2/{screen_name}/conversations/{conv_id}/close"
+        id_summary.append({
+            "internal_session_id": session_id,
+            "salesiq_conversation_id": conv_id,
+            "close_api_url": close_url,
+            "has_messages": session_id in conversations,
+            "message_count": len(conversations.get(session_id, []))
+        })
+    
+    return {
+        "total_conversations": len(conversation_id_map),
+        "screen_name": screen_name,
+        "conversations": id_summary,
+        "note": "Use close_api_url with POST request and Bearer token to close chat"
+    }
+
 @app.get("/test/widget", response_class=HTMLResponse)
 async def test_widget():
     """Public test page to load SalesIQ widget for real visitor testing.
@@ -549,6 +576,77 @@ async def salesiq_webhook(request: dict):
         logger.debug(f"[SalesIQ] Chat data: {chat}")
         logger.debug(f"[SalesIQ] Conversation data: {conversation}")
         
+        # ============================================================
+        # SALESIQ API CONVERSATION ID EXTRACTION
+        # ============================================================
+        # Extract ALL possible conversation IDs from webhook payload
+        salesiq_conversation_id = conversation.get('id')
+        salesiq_chat_id = chat.get('id')
+        salesiq_visitor_id = visitor.get('id')
+        salesiq_active_conversation = visitor.get('active_conversation_id')
+        
+        # Extract message details BEFORE logging
+        message_obj = request.get('message', {})
+        message_timestamp = None
+        message_text_preview = ""
+        if isinstance(message_obj, dict):
+            message_timestamp = message_obj.get('time') or message_obj.get('timestamp')
+            message_text_preview = message_obj.get('text', '').strip()
+        else:
+            message_text_preview = str(message_obj).strip()
+        
+        # Get visitor info
+        visitor_name = visitor.get('name', 'Unknown')
+        visitor_email = visitor.get('email', 'No email')
+        visitor_phone = visitor.get('phone', 'No phone')
+        
+        # Log comprehensive ID mapping for close API
+        logger.info("=" * 80)
+        logger.info("SALESIQ WEBHOOK PAYLOAD - CONVERSATION ID MAPPING")
+        logger.info("=" * 80)
+        logger.info(f"Timestamp: {datetime.now().isoformat()}")
+        logger.info(f"Visitor Info:")
+        logger.info(f"  - Name: {visitor_name}")
+        logger.info(f"  - Email: {visitor_email}")
+        logger.info(f"  - Phone: {visitor_phone}")
+        logger.info(f"")
+        logger.info(f"ID Extraction:")
+        logger.info(f"  - salesiq_conversation_id: {salesiq_conversation_id}")
+        logger.info(f"  - salesiq_chat_id: {salesiq_chat_id}")
+        logger.info(f"  - salesiq_visitor_id: {salesiq_visitor_id}")
+        logger.info(f"  - salesiq_active_conversation: {salesiq_active_conversation}")
+        logger.info(f"")
+        logger.info(f"Message Details:")
+        if message_timestamp:
+            logger.info(f"  - Message Time: {message_timestamp}")
+        logger.info(f"  - Text: {message_text_preview[:200] if message_text_preview else '(empty)'}")
+        
+        # Extract payload (from quick reply buttons)
+        payload = request.get('payload', '')
+        if payload:
+            logger.info(f"  - Payload: {payload}")
+        
+        # Determine the correct conversation_id for API calls
+        api_conversation_id = (
+            salesiq_conversation_id or 
+            salesiq_active_conversation or 
+            salesiq_chat_id
+        )
+        
+        if api_conversation_id:
+            screen_name = os.getenv('SALESIQ_SCREEN_NAME', 'rtdsportal')
+            close_api_endpoint = f"POST /api/v2/{screen_name}/conversations/{api_conversation_id}/close"
+            logger.info(f"")
+            logger.info(f"API CLOSE ENDPOINT:")
+            logger.info(f"  {close_api_endpoint}")
+            logger.info(f"")
+            logger.info(f"Full URL:")
+            logger.info(f"  https://salesiq.zohopublic.in/api/v2/{screen_name}/conversations/{api_conversation_id}/close")
+        else:
+            logger.warning(f"NO CONVERSATION ID FOUND - Cannot construct close API endpoint")
+        
+        logger.info("=" * 80)
+        
         # Extract session ID (try multiple sources)
         session_id = (
             visitor.get('active_conversation_id') or
@@ -561,21 +659,17 @@ async def salesiq_webhook(request: dict):
         
         # Update session context for logging
         session_id_var.set(session_id)
-        logger.info(f"[SalesIQ] Session ID: {session_id}")
         
-        # Extract message text - handle multiple formats
-        message_obj = request.get('message', {})
+        # Store conversation ID mapping for later API operations (close, transfer)
+        if api_conversation_id and session_id != 'unknown':
+            conversation_id_map[session_id] = api_conversation_id
+            logger.info(f"[ID Mapping] Stored: session_id={session_id} -> conversation_id={api_conversation_id}")
+        
+        # Extract message text - handle multiple formats (already extracted above for logging)
         if isinstance(message_obj, dict):
             message_text = message_obj.get('text', '').strip()
         else:
             message_text = str(message_obj).strip()
-        
-        # Extract payload (from quick reply buttons)
-        payload = request.get('payload', '')
-        
-        logger.info(f"[SalesIQ] Message: {message_text[:100]}")
-        if payload:
-            logger.info(f"[SalesIQ] Payload: {payload}")
         
         # Handle empty message
         if not message_text:
