@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
 import asyncio
-from openai import OpenAI
 from dotenv import load_dotenv
 import urllib3
 import uvicorn
@@ -35,39 +34,17 @@ from services.state_manager import (
 from services.handler_registry import handler_registry
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# LLM SETUP: Try Gemini first, fall back to OpenAI if not available
-# Gemini benefits: 1M context (no truncation!), 50% cheaper, faster
+# GEMINI-POWERED: Using Gemini 2.5 Flash instead of GPT-4o-mini
+# Benefits: 1M context (no truncation!), 50% cheaper, faster
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-try:
-    from services.gemini_classifier import (
-        gemini_classifier,
-        classify_resolution,
-        classify_escalation,
-        classify_intent,
-        ClassificationResult
-    )
-    from services.gemini_generator import gemini_generator
-    
-    # Check if Gemini actually initialized (needs GOOGLE_API_KEY)
-    if gemini_classifier is not None:
-        llm_classifier = gemini_classifier
-        USE_GEMINI = True
-        print("✅ Using Gemini 2.5 Flash for LLM operations")
-    else:
-        raise ImportError("Gemini classifier is None - API key missing")
-        
-except Exception as e:
-    print(f"⚠️ Gemini not available ({e}), falling back to OpenAI GPT-4o-mini")
-    # Fall back to original OpenAI classifier
-    from services.llm_classifier import (
-        llm_classifier,
-        classify_resolution,
-        classify_escalation,
-        classify_intent,
-        ClassificationResult
-    )
-    gemini_generator = None
-    USE_GEMINI = False
+from services.gemini_classifier import (
+    gemini_classifier as llm_classifier,
+    classify_resolution,
+    classify_escalation,
+    classify_intent,
+    ClassificationResult
+)
+from services.gemini_generator import gemini_generator
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -346,71 +323,42 @@ def build_past_messages(history: List[Dict]) -> List[Dict]:
 EXPERT_PROMPT = load_expert_prompt()
 logger.info(f"Expert prompt loaded successfully ({len(EXPERT_PROMPT)} characters)")
 
-# Initialize OpenAI client for fallback
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-LLM_MODEL = "gemini-2.5-flash" if USE_GEMINI else "gpt-4o-mini"
-
 def generate_response(message: str, history: List[Dict], category: str = "other") -> str:
-    """Generate response using LLM with conversation context
+    """Generate response using Gemini with FULL conversation context
     
-    Uses Gemini if available (1M context, no truncation), falls back to OpenAI.
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🚀 GEMINI-POWERED: No more truncation!
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    With 1M token context:
+    - Include FULL conversation history
+    - Bot remembers entire conversation
+    - Better troubleshooting continuity
+    - Higher resolution rates
     
     Args:
         message: User message text
-        history: Conversation history
+        history: FULL conversation history (no truncation!)
         category: Issue category from IssueRouter
     
     Returns:
         Tuple of (response_text, tokens_used)
     """
     
-    # Add category hint to system prompt for better responses
-    category_hints = {
-        "login": "Focus on RDP connection, login issues, password resets, and SelfCare portal guidance.",
-        "quickbooks": "Focus on QuickBooks errors, company file issues, freezing/hanging, and QB-specific troubleshooting.",
-        "performance": "Focus on server performance, disk space, RAM/CPU usage, and system slowness.",
-        "printing": "Focus on printer redirection, printing issues, and RDP printer settings.",
-        "office": "Focus on Microsoft Office applications, Outlook, Excel, and Office 365 activation."
-    }
-    
-    system_prompt = EXPERT_PROMPT
-    if category != "other" and category in category_hints:
-        system_prompt = f"{EXPERT_PROMPT}\n\n[CATEGORY: {category.upper()}] {category_hints[category]}"
-        logger.info(f"Added category hint for: {category}")
-    
-    # Try Gemini first if available
-    if USE_GEMINI and gemini_generator:
-        try:
-            response_text, tokens_used = gemini_generator.generate_response(
-                message=message,
-                history=history,  # FULL history - no truncation with Gemini!
-                system_prompt=system_prompt,
-                category=category
-            )
-            logger.info(f"[Gemini] Response generated: {len(response_text)} chars, ~{tokens_used} tokens")
-            return response_text, tokens_used
-        except Exception as e:
-            logger.error(f"[Gemini] Generation failed: {e}, falling back to OpenAI")
-    
-    # Fall back to OpenAI GPT-4o-mini
-    try:
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": message})
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=400
+    # Use Gemini generator with full history
+    if gemini_generator:
+        response_text, tokens_used = gemini_generator.generate_response(
+            message=message,
+            history=history,  # FULL history - no truncation!
+            system_prompt=EXPERT_PROMPT,
+            category=category
         )
         
-        tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
-        logger.info(f"[OpenAI] Response generated: {tokens_used} tokens")
-        
-        return response.choices[0].message.content, tokens_used
-    except Exception as e:
-        logger.error(f"[OpenAI] Generation also failed: {e}")
+        logger.info(f"[Gemini] Response generated: {len(response_text)} chars, ~{tokens_used} tokens")
+        return response_text, tokens_used
+    else:
+        # Fallback if Gemini not available
+        logger.error("[Gemini] Generator not available - using fallback response")
         fallback = (
             "I apologize, but I'm having trouble processing your request right now. "
             "Please try again, or contact our support team directly:\n\n"
@@ -437,15 +385,14 @@ async def root():
     logger.info("Root endpoint accessed")
     return {
         "status": "online",
-        "service": "Ace Cloud Hosting Support Bot",
+        "service": "Ace Cloud Hosting Support Bot - Gemini Powered",
         "version": "3.0.0",
-        "llm_engine": LLM_MODEL,
-        "using_gemini": USE_GEMINI,
-        "context_window": "1,000,000 tokens" if USE_GEMINI else "128,000 tokens",
+        "llm_engine": "gemini-2.5-flash",
+        "context_window": "1,000,000 tokens (no truncation)",
         "api_status": {
             "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
             "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
-            "gemini_enabled": USE_GEMINI and gemini_generator is not None
+            "gemini_enabled": gemini_generator is not None
         },
         "endpoints": {
             "salesiq_webhook": "/webhook/salesiq",
@@ -462,14 +409,13 @@ async def health():
     return {
         "status": "healthy",
         "mode": "production",
-        "llm": LLM_MODEL,
-        "using_gemini": USE_GEMINI,
-        "llm_status": "connected" if (USE_GEMINI and gemini_generator) or (not USE_GEMINI and llm_classifier) else "fallback",
+        "llm": "gemini-2.5-flash",
+        "llm_status": "connected" if gemini_generator else "unavailable",
         "active_sessions": len(conversations),
         "api_status": {
             "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
             "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
-            "gemini_enabled": USE_GEMINI
+            "gemini_enabled": gemini_generator is not None
         },
         "webhook_url": "https://web-production-3032d.up.railway.app/webhook/salesiq"
     }
