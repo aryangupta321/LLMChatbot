@@ -1594,7 +1594,7 @@ async def salesiq_webhook(request: dict):
         logger.info(f"[Handler] No handler matched, continuing with existing logic")
         
         # Generate LLM response with embedded resolution steps
-        logger.info(f"[LLM] 🤖 CALLING GPT-4o-mini for category: {category}")
+        logger.info(f"[LLM] 🤖 CALLING Gemini 2.5 Flash for category: {category}")
         response_text, tokens_used = generate_response(message_text, history, category=category)
         logger.info(f"[LLM] ✓ Response generated | Tokens used: {tokens_used} | Category: {category}")
         
