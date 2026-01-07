@@ -186,7 +186,16 @@ class GeminiClassifier:
             
             logger.debug(f"[Gemini] Tokens: ~{input_tokens} in, ~{output_tokens} out, Session total: {self.session_token_usage.get(session_id, 0):,}")
             
-            return response.text.strip()
+            # Strip markdown code fences if present (Gemini sometimes returns ```json...```)
+            response_text = response.text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]  # Remove ```json
+            if response_text.startswith("```"):
+                response_text = response_text[3:]  # Remove ```
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]  # Remove trailing ```
+            
+            return response_text.strip()
             
         except Exception as e:
             logger.error(f"[Gemini] API call failed: {e}")
