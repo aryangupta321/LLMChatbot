@@ -48,13 +48,13 @@ def test_conversation_restart_logic():
         # If user wants to continue, conversation restarts
         is_restart = user_wants_to_continue and not user_wants_to_close
         
-        status = "✅ PASS" if is_restart == should_continue else "❌ FAIL"
+        status = "[PASS]" if is_restart == should_continue else "[FAIL]"
         passed += 1 if is_restart == should_continue else 0
         
         print(f"{status}: '{message}'")
-        print(f"  └─ Expected: {should_continue}, Got: {is_restart} | {reason}")
+        print(f"  - Expected: {should_continue}, Got: {is_restart} | {reason}")
     
-    print(f"\n✅ Conversation Restart Logic: {passed}/{len(test_cases)} passed")
+    print(f"\nConversation Restart Logic: {passed}/{len(test_cases)} passed")
     return passed == len(test_cases)
 
 
@@ -91,13 +91,13 @@ def test_fallback_detection_logic():
         
         detected = is_unclear or is_short_and_unclear
         
-        status = "✅ PASS" if detected == should_be_unclear else "❌ FAIL"
+        status = "[PASS]" if detected == should_be_unclear else "[FAIL]"
         passed += 1 if detected == should_be_unclear else 0
         
         print(f"{status}: '{response}'")
-        print(f"  └─ Expected: {should_be_unclear}, Got: {detected} | {reason}")
+        print(f"  - Expected: {should_be_unclear}, Got: {detected} | {reason}")
     
-    print(f"\n✅ Fallback Detection: {passed}/{len(test_cases)} passed")
+    print(f"\nFallback Detection: {passed}/{len(test_cases)} passed")
     return passed == len(test_cases)
 
 
@@ -127,13 +127,13 @@ def test_satisfaction_message_detection():
     for message, should_be_satisfaction, reason in test_messages:
         is_satisfaction = any(indicator in message.lower() for indicator in satisfaction_indicators)
         
-        status = "✅ PASS" if is_satisfaction == should_be_satisfaction else "❌ FAIL"
+        status = "[PASS]" if is_satisfaction == should_be_satisfaction else "[FAIL]"
         passed += 1 if is_satisfaction == should_be_satisfaction else 0
         
         print(f"{status}: '{message}'")
-        print(f"  └─ Expected: {should_be_satisfaction}, Got: {is_satisfaction} | {reason}")
+        print(f"  - Expected: {should_be_satisfaction}, Got: {is_satisfaction} | {reason}")
     
-    print(f"\n✅ Satisfaction Detection: {passed}/{len(test_messages)} passed")
+    print(f"\nSatisfaction Detection: {passed}/{len(test_messages)} passed")
     return passed == len(test_messages)
 
 
@@ -169,12 +169,12 @@ def test_resolution_keywords():
         
         detected_resolution = has_positive and not has_negative
         
-        status = "✅ PASS" if detected_resolution == should_have_resolution else "❌ FAIL"
+        status = "[PASS]" if detected_resolution == should_have_resolution else "[FAIL]"
         passed += 1 if detected_resolution == should_have_resolution else 0
         
-        print(f"{status}: '{message}' → {detected_resolution} (expected {should_have_resolution})")
+        print(f"{status}: '{message}' -> {detected_resolution} (expected {should_have_resolution})")
     
-    print(f"\n✅ Resolution Keywords: {passed}/{len(all_cases)} passed")
+    print(f"\nResolution Keywords: {passed}/{len(all_cases)} passed")
     return passed == len(all_cases)
 
 
@@ -202,18 +202,18 @@ def test_escalation_keywords():
     for message, should_escalate, in escalation_cases:
         has_escalation = any(keyword in message.lower() for keyword in escalation_keywords)
         
-        status = "✅ PASS" if has_escalation == should_escalate else "❌ FAIL"
+        status = "[PASS]" if has_escalation == should_escalate else "[FAIL]"
         passed += 1 if has_escalation == should_escalate else 0
         
-        print(f"{status}: '{message}' → escalate={has_escalation} (expected {should_escalate})")
+        print(f"{status}: '{message}' -> escalate={has_escalation} (expected {should_escalate})")
     
-    print(f"\n✅ Escalation Keywords: {passed}/{len(escalation_cases)} passed")
+    print(f"\nEscalation Keywords: {passed}/{len(escalation_cases)} passed")
     return passed == len(escalation_cases)
 
 
 def main():
     print("\n" + "="*70)
-    print("🤖 LLM CLASSIFICATION - LOGIC TESTS (No API Keys Required)")
+    print("[LLM] CLASSIFICATION - LOGIC TESTS (No API Keys Required)")
     print("="*70)
     
     results = {
@@ -226,27 +226,27 @@ def main():
     
     # Summary
     print("\n" + "="*70)
-    print("📊 TEST SUMMARY")
+    print("[SUMMARY] TEST RESULTS")
     print("="*70)
     
     total_passed = sum(1 for v in results.values() if v)
     total_tests = len(results)
     
     for test_name, passed in results.items():
-        status = "✅ PASS" if passed else "❌ FAIL"
+        status = "[PASS]" if passed else "[FAIL]"
         print(f"{status}: {test_name.replace('_', ' ').title()}")
     
     print("\n" + "="*70)
     if total_passed == total_tests:
-        print(f"🎯 ALL TESTS PASSED! ({total_passed}/{total_tests})")
+        print(f"[PASS] ALL TESTS PASSED! ({total_passed}/{total_tests})")
         print("="*70)
-        print("\n✅ Ready for Railway deployment!")
+        print("\n[OK] Ready for Railway deployment!")
         print("   - Conversation restart logic: OK")
         print("   - Fallback detection: OK")
         print("   - Resolution/Escalation keywords: OK")
         print("   - Satisfaction message handling: OK")
     else:
-        print(f"⚠️  {total_tests - total_passed} test(s) failed")
+        print(f"[WARN] {total_tests - total_passed} test(s) failed")
     
     print("="*70 + "\n")
     
