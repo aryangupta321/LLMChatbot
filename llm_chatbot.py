@@ -1628,8 +1628,9 @@ async def salesiq_webhook(request: dict):
         
         response_seems_unclear = any(indicator in response_text.lower() for indicator in unclear_indicators)
         
-        if response_seems_unclear or len(response_text) < 50:
-            logger.info(f"[Fallback] Response seems unclear or too short - adding escalation option")
+        # Only add escalation if response explicitly says it doesn't understand (not just because it's short)
+        if response_seems_unclear:
+            logger.info(f"[Fallback] Response indicates unclear understanding - adding escalation option")
             response_text += "\n\nIf I'm not understanding correctly, would you like to speak with our support team? I can connect you to an agent or schedule a callback." 
         
         logger.info(f"[SalesIQ] Response generated: {response_text[:100]}...")
