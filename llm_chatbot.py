@@ -34,6 +34,9 @@ from services.state_manager import (
 # Import HandlerRegistry for pattern-based response handling
 from services.handler_registry import handler_registry
 
+# Import LLM Classifier for intelligent decision making
+from services.llm_classifier import llm_classifier, classify_resolution, classify_escalation, classify_intent, ClassificationResult
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
@@ -750,92 +753,156 @@ async def salesiq_webhook(request: dict):
                     "session_id": session_id
                 }
         
-        # Check for issue resolution - CONTEXTUAL AUTO-CLOSE
-        # Only trigger if the user explicitly confirms the issue is RESOLVED/FIXED/WORKING
-        resolution_keywords = [
-            # Direct resolution confirmations ONLY (removed standalone acknowledgments)
-            "resolved", "fixed", "working now", "solved", "all set", "working fine",
-            "works now", "problem solved", "issue fixed", "issue resolved",
-            "that worked", "that works", "that helped", "that fixed it",
-            "it works", "it's working", "its working", "no more issues",
-            "no problem now", "back to normal"
-        ]
+        # ============================================================
+        # CHECK IF USER IS CONTINUING AFTER SATISFACTION MESSAGE
+        # ============================================================
+        # If user asks a new question after we sent satisfaction message,
+        # treat it as a NEW conversation (don't try to close chat)
         
-        # Check if user message contains explicit resolution confirmation
-        has_resolution_keyword = any(keyword in message_lower for keyword in resolution_keywords)
-        
-        # Get last bot message to check if we offered closure
-        last_bot_message = ""
+        conversation_should_restart = False
         if len(conversations[session_id]) >= 2:
-            last_bot_message = conversations[session_id][-1].get('content', '').lower()
+            last_bot_message = conversations[session_id][-1].get('content', '') if conversations[session_id][-1].get('role') == 'assistant' else ''
+            
+            # Check if we recently sent satisfaction/closure message
+            satisfaction_indicators = [
+                "i'm happy the issue is resolved",
+                "is there anything else i can help",
+                "would you like me to close this chat",
+                "have a great day"
+            ]
+            
+            recently_asked_to_close = any(indicator in last_bot_message.lower() for indicator in satisfaction_indicators)
+            
+            if recently_asked_to_close:
+                # Check user's response
+                user_wants_to_continue = (
+                    "yes" in message_lower or 
+                    "i have" in message_lower or
+                    "another" in message_lower or
+                    "help" in message_lower or
+                    "question" in message_lower or
+                    len(message_text) > 15  # Likely a new question, not just "no" or "bye"
+                )
+                
+                user_wants_to_close = (
+                    "no" in message_lower or
+                    "nope" in message_lower or
+                    "close" in message_lower or
+                    "bye" in message_lower or
+                    "thanks" in message_lower or
+                    "thank you" in message_lower
+                ) and len(message_text) < 20  # Short closure confirmation
+                
+                if user_wants_to_continue:
+                    logger.info(f"[Conversation] User has NEW question after resolution - restarting conversation")
+                    conversation_should_restart = True
+                    # Reset state to active
+                    state_manager.start_session(session_id)
+                    
+                elif user_wants_to_close:
+                    logger.info(f"[Conversation] User confirmed chat closure")
+                    response_text = "You're welcome! Feel free to reach out anytime. Goodbye! 👋"
+                    conversations[session_id].append({"role": "user", "content": message_text})
+                    conversations[session_id].append({"role": "assistant", "content": response_text})
+                    
+                    # Mark as resolved and let idle timeout handle closure
+                    if session_id in conversations:
+                        metrics_collector.end_conversation(session_id, "resolved")
+                        state_manager.end_session(session_id, ConversationState.RESOLVED)
+                    
+                    return {
+                        "action": "reply",
+                        "replies": [response_text],
+                        "session_id": session_id
+                    }
         
-        # Closure offer indicators in bot's last message
-        bot_offered_closure = any(phrase in last_bot_message for phrase in [
-            "anything else", "is there anything else", "further assistance",
-            "help you with anything", "need help with", "can i help",
-            "issue resolved", "problem resolved", "working now"
-        ])
+        # ============================================================
+        # OPTIMIZED LLM CLASSIFICATION (1 API call instead of 3)
+        # ============================================================
+        # Use unified classification to analyze resolution + escalation + intent in single call
+        # Saves 66% of API calls (3x → 1x per message)
+        # Includes token tracking and hallucination prevention
+        # SKIP classification if conversation just restarted (new question after resolution)
         
-        # Only auto-close if BOTH:
-        # 1. User explicitly confirms resolution (not just "okay" or "perfect")
-        # 2. OR bot previously offered closure and user says positive acknowledgment
-        if has_resolution_keyword:
-            logger.info(f"[Resolution] ✓ ISSUE RESOLVED")
-            logger.info(f"[Resolution] Reason: User explicitly confirmed - '{message_text[:50]}'")
-            logger.info(f"[Resolution] Action: Auto-closing chat session")
+        if conversation_should_restart:
+            logger.info(f"[LLM Classifier] Skipping classification - conversation restarted with new question")
+            # Force uncertain classification to let main LLM handle the new question
+            classifications = {
+                "resolution": ClassificationResult("UNCERTAIN", 0, "New question after resolution", ""),
+                "escalation": ClassificationResult("BOT_CAN_HANDLE", 100, "New conversation", ""),
+                "intent": ClassificationResult("QUESTION", 100, "User has new question", "")
+            }
+        else:
+            logger.info(f"[LLM Classifier] Running unified classification (1 API call)...")
+            
+            try:
+                classifications = llm_classifier.classify_unified(
+                    message_text, 
+                    conversations[session_id],
+                    session_id=session_id  # Track token usage per session
+                )
+            except Exception as e:
+                logger.error(f"[LLM Classifier] Classification failed: {e}")
+                # Fallback: Continue without classification (let main LLM handle it)
+                classifications = {
+                    "resolution": ClassificationResult("UNCERTAIN", 0, "Classification error", ""),
+                    "escalation": ClassificationResult("UNCERTAIN", 0, "Classification error", ""),
+                    "intent": ClassificationResult("OTHER", 0, "Classification error", "")
+                }
+        
+        resolution_classification = classifications["resolution"]
+        escalation_classification = classifications["escalation"]
+        
+        logger.info(f"[LLM Classifier] Resolution: {resolution_classification.decision} ({resolution_classification.confidence}%) - {resolution_classification.reasoning}")
+        logger.info(f"[LLM Classifier] Escalation: {escalation_classification.decision} ({escalation_classification.confidence}%) - {escalation_classification.reasoning}")
+        
+        # ============================================================
+        # RESOLUTION CHECK (Smart Satisfaction Confirmation)
+        # ============================================================
+        # NOTE: Zoho doesn't allow API-based chat closure for bot chats
+        # Strategy: Confirm resolution + let idle timeout close chat (2-3 min)
+        # Main value: Prevents unnecessary escalations by detecting true resolution
+        
+        if llm_classifier.should_close_chat(resolution_classification):
+            logger.info(f"[Resolution] ✓ ISSUE RESOLVED (LLM-confirmed)")
+            logger.info(f"[Resolution] User message: '{message_text[:100]}'")
+            logger.info(f"[Resolution] Confidence: {resolution_classification.confidence}% (threshold: {llm_classifier.resolution_threshold}%)")
+            logger.info(f"[Resolution] Action: Send satisfaction confirmation (auto-close via idle timeout)")
             
             # Transition to resolved state
             state_manager.end_session(session_id, ConversationState.RESOLVED)
             
-            response_text = "Excellent! I'm happy the issue is resolved. This chat will close automatically. Feel free to start a new chat if you need help in the future. Have a great day!"
+            # Send final satisfaction message - chat will close via idle timeout
+            response_text = (
+                "Excellent! I'm happy the issue is resolved. 😊\n\n"
+                "If you need anything else, just type your question. Otherwise, this chat will close automatically after a few moments of inactivity.\n\n"
+                "Have a great day!"
+            )
+            
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            # Auto-close chat in SalesIQ since issue is resolved
-            close_result = salesiq_api.close_chat(session_id, "resolved")
-            if close_result.get('success'):
-                logger.info(f"[Action] ✓ CHAT AUTO-CLOSED SUCCESSFULLY")
-            else:
-                logger.warning(f"[Action] Chat closure attempted with status: {close_result}")
-            
+            # Track resolution (important for metrics)
             if session_id in conversations:
                 metrics_collector.end_conversation(session_id, "resolved")
-                del conversations[session_id]
+                logger.info(f"[Metrics] 📊 Issue resolved by bot - prevented escalation")
+                # Keep conversation in memory for idle timeout period
+                # Will be cleaned up by Zoho's idle timeout (not us)
+            
             return {
                 "action": "reply",
                 "replies": [response_text],
                 "session_id": session_id
             }
         
-        # Check for not resolved - COMPREHENSIVE DETECTION
-        not_resolved_keywords = [
-            # Direct "not working" statements
-            "not resolved", "not fixed", "not working", "didn't work", "doesn't work", "does not work",
-            "still not", "still stuck", "still broken", "still having", "still same", "same issue",
-            "same problem", "no progress", "no change", "nothing changed", "nothing worked",
-            
-            # Negative feedback
-            "that doesn't help", "that didn't help", "doesn't help", "not helpful", "unhelpful",
-            "wrong answer", "not right", "incorrect", "not what i need", "not solving",
-            
-            # Problem persistence
-            "issue persist", "problem persist", "keep getting", "keeps happening", "still error",
-            "error again", "again", "tried that", "already tried", "done that",
-            
-            # Frustration indicators
-            "frustrated", "frustrating", "annoyed", "annoying", "waste of time", "wasting time",
-            "tired of", "fed up", "had enough", "ridiculous", "unacceptable",
-            
-            # Dissatisfaction
-            "disappointed", "dissatisfied", "not satisfied", "unhappy", "upset",
-            "this sucks", "terrible", "awful", "horrible", "useless",
-            
-            # Urgency/severity
-            "urgent", "emergency", "critical", "serious", "major issue", "big problem"
-        ]
-        if any(keyword in message_lower for keyword in not_resolved_keywords):
-            logger.info(f"[Escalation] 🆙 PROBLEM NOT RESOLVED - Offering escalation options")
-            logger.info(f"[Escalation] Detected keyword in: {message_text[:100]}")
+        # ============================================================
+        # ESCALATION CHECK (already analyzed in unified call above)
+        # ============================================================
+        # Offer escalation if LLM detects user needs human help
+        if llm_classifier.should_escalate(escalation_classification):
+            logger.info(f"[Escalation] 🆙 USER NEEDS HUMAN ASSISTANCE (LLM-detected)")
+            logger.info(f"[Escalation] User message: '{message_text[:100]}'")
+            logger.info(f"[Escalation] Confidence: {escalation_classification.confidence}% (threshold: {llm_classifier.escalation_threshold}%)")
             logger.info(f"[Escalation] Options: ① Instant Chat | ② Schedule Callback")
             
             # Transition to escalation options state
@@ -1505,6 +1572,26 @@ async def salesiq_webhook(request: dict):
         response_text = re.sub(r'^\s*\*\s+', '- ', response_text, flags=re.MULTILINE)
         response_text = re.sub(r'\n\s*\n+', '\n', response_text)
         response_text = response_text.strip()
+        
+        # ============================================================
+        # FALLBACK: Handle unrecognized/unclear inputs
+        # ============================================================
+        # If LLM response is very short or generic, might indicate confusion
+        # Add helpful escalation option for user
+        
+        unclear_indicators = [
+            "i don't understand",
+            "i'm not sure",
+            "could you clarify",
+            "can you rephrase",
+            "i didn't quite get that"
+        ]
+        
+        response_seems_unclear = any(indicator in response_text.lower() for indicator in unclear_indicators)
+        
+        if response_seems_unclear or len(response_text) < 50:
+            logger.info(f"[Fallback] Response seems unclear or too short - adding escalation option")
+            response_text += "\n\nIf I'm not understanding correctly, would you like to speak with our support team? I can connect you to an agent or schedule a callback." 
         
         logger.info(f"[SalesIQ] Response generated: {response_text[:100]}...")
         

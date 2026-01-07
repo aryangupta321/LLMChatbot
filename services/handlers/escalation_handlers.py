@@ -2,11 +2,12 @@
 Escalation and Resolution Handlers
 
 Handles user requests for escalation options, resolution confirmation,
-and problem acknowledgment.
+and problem acknowledgment. Uses LLM classification for intelligent intent detection.
 """
 
 from services.handlers.base import BaseHandler, HandlerResponse, check_keywords, check_exact_match
 from services.state_manager import ConversationState, TransitionTrigger
+from services.llm_classifier import classify_intent, classify_escalation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -84,19 +85,39 @@ class ProblemNotResolvedHandler(BaseHandler):
 
 
 class AgentRequestHandler(BaseHandler):
-    """Handles direct requests to speak with an agent"""
-    
-    AGENT_REQUEST_PHRASES = [
-        "connect me to agent", "connect to agent", "human agent",
-        "talk to human", "speak to agent"
-    ]
+    """
+    Handles direct requests to speak with an agent.
+    Uses LLM classification to intelligently detect agent requests.
+    """
     
     def can_handle(self, message: str, context: dict) -> bool:
-        message_lower = message.lower()
-        return any(phrase in message_lower for phrase in self.AGENT_REQUEST_PHRASES)
+        """
+        Use LLM to classify if user wants to transfer to agent.
+        Fallback to keyword matching if LLM fails.
+        """
+        # Skip if user is already in escalation flow (pressed a button)
+        state = context.get("state")
+        if state == ConversationState.ESCALATION_OPTIONS.value:
+            return False
+        
+        try:
+            history = context.get("history", [])
+            intent = classify_intent(message, history)
+            
+            logger.info(f"[AgentRequestHandler] LLM Intent: {intent.decision} (confidence: {intent.confidence}%)")
+            
+            # Consider TRANSFER intent with medium confidence
+            return intent.decision == "TRANSFER" and intent.confidence >= 60
+            
+        except Exception as e:
+            logger.warning(f"[AgentRequestHandler] LLM classification failed, using keyword fallback: {e}")
+            # Fallback to simple keyword check
+            message_lower = message.lower()
+            keywords = ["agent", "human", "person", "representative", "support team"]
+            return any(keyword in message_lower for keyword in keywords)
     
     def handle(self, message: str, context: dict) -> HandlerResponse:
-        logger.info(f"[AgentRequestHandler] User requesting human agent")
+        logger.info(f"[AgentRequestHandler] User requesting human agent (LLM-detected)")
         
         return HandlerResponse(
             text="I can help you with that. Here are your options:",

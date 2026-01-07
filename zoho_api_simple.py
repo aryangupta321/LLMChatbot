@@ -356,7 +356,8 @@ class ZohoDeskAPI:
         
         logger.info(f"Desk: Creating callback call - endpoint: {endpoint}")
         logger.info(f"Desk: Token length: {len(self.access_token)}, OrgId: {self.org_id}")
-        logger.info(f"Desk: Payload: {payload}")
+        logger.error(f"Desk: FULL PAYLOAD BEING SENT: {payload}")
+        logger.error(f"Desk: HEADERS: {headers}")
         
         # Retry logic for transient failures
         for attempt in range(1, MAX_RETRIES + 1):
