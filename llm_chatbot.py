@@ -1,6 +1,6 @@
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -678,11 +678,14 @@ async def salesiq_webhook(request: dict):
         if not message_text:
             logger.info(f"[Session] 👋 INITIAL CONTACT - Sending greeting")
             logger.info(f"[Session] New visitor from: {visitor.get('email', 'unknown')}")
-            return {
-                "action": "reply",
-                "replies": ["Hi! I'm AceBuddy, your Ace Cloud Hosting support assistant. What can I help you with today?"],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": ["Hi! I'm AceBuddy, your Ace Cloud Hosting support assistant. What can I help you with today?"],
+                    "session_id": session_id
+                }
+            )
         
         # Initialize conversation history
         if session_id not in conversations:
@@ -701,21 +704,27 @@ async def salesiq_webhook(request: dict):
         
         if is_greeting and len(history) == 0:
             logger.info(f"[SalesIQ] Simple greeting detected - first message")
-            return {
-                "action": "reply",
-                "replies": ["Hello! How can I assist you today?"],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": ["Hello! How can I assist you today?"],
+                    "session_id": session_id
+                }
+            )
         
         # Handle contact requests
         contact_request_phrases = ['support email', 'support number', 'contact support', 'phone number', 'email address']
         if any(phrase in message_lower for phrase in contact_request_phrases):
             logger.info(f"[SalesIQ] Contact request detected")
-            return {
-                "action": "reply",
-                "replies": ["You can reach Ace Cloud Hosting support at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": ["You can reach Ace Cloud Hosting support at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com"],
+                    "session_id": session_id
+                }
+            )
         
         # Check for human agent request FIRST
         if len(history) > 0 and ('yes' in message_lower or 'ok' in message_lower or 'connect' in message_lower):
@@ -747,11 +756,14 @@ async def salesiq_webhook(request: dict):
                     metrics_collector.end_conversation(session_id, "escalated")
                     del conversations[session_id]
                 
-                return {
-                    "action": "reply",
-                    "replies": ["I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."],
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": ["I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."],
+                        "session_id": session_id
+                    }
+                )
         
         # ============================================================
         # CHECK IF USER IS CONTINUING AFTER SATISFACTION MESSAGE
@@ -889,11 +901,14 @@ async def salesiq_webhook(request: dict):
                 # Keep conversation in memory for idle timeout period
                 # Will be cleaned up by Zoho's idle timeout (not us)
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         
         # ============================================================
         # ESCALATION CHECK (already analyzed in unified call above)
@@ -914,23 +929,26 @@ async def salesiq_webhook(request: dict):
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "suggestions": [
-                    {
-                        "text": "📞 Instant Chat",
-                        "action_type": "reply",
-                        "action_value": "1"
-                    },
-                    {
-                        "text": "📅 Schedule Callback",
-                        "action_type": "reply",
-                        "action_value": "2"
-                    }
-                ],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "suggestions": [
+                        {
+                            "text": "📞 Instant Chat",
+                            "action_type": "reply",
+                            "action_value": "1"
+                        },
+                        {
+                            "text": "📅 Schedule Callback",
+                            "action_type": "reply",
+                            "action_value": "2"
+                        }
+                    ],
+                    "session_id": session_id
+                }
+            )
         
         # Check for password reset - improved flow
         password_keywords = ["password", "reset", "forgot", "locked out"]
@@ -947,32 +965,41 @@ async def salesiq_webhook(request: dict):
                         response_text = "Great! Visit https://selfcare.acecloudhosting.com and click 'Forgot your password'. Let me know when you're there!"
                         conversations[session_id].append({"role": "user", "content": message_text})
                         conversations[session_id].append({"role": "assistant", "content": response_text})
-                        return {
-                            "action": "reply",
-                            "replies": [response_text],
-                            "session_id": session_id
-                        }
+                        return JSONResponse(
+                            status_code=200,
+                            content={
+                                "action": "reply",
+                                "replies": [response_text],
+                                "session_id": session_id
+                            }
+                        )
                     elif 'no' in message_lower or 'not registered' in message_lower:
                         logger.info(f"[SalesIQ] User is NOT registered on SelfCare")
                         response_text = "No problem! For server/user account password reset, please contact our support team at 1-888-415-5240. They'll help you right away!"
                         conversations[session_id].append({"role": "user", "content": message_text})
                         conversations[session_id].append({"role": "assistant", "content": response_text})
-                        return {
-                            "action": "reply",
-                            "replies": [response_text],
-                            "session_id": session_id
-                        }
+                        return JSONResponse(
+                            status_code=200,
+                            content={
+                                "action": "reply",
+                                "replies": [response_text],
+                                "session_id": session_id
+                            }
+                        )
             else:
                 # First time asking about password reset
                 logger.info(f"[SalesIQ] First password reset question - asking about SelfCare registration")
                 response_text = "I can help! Are you registered on the SelfCare portal?"
                 conversations[session_id].append({"role": "user", "content": message_text})
                 conversations[session_id].append({"role": "assistant", "content": response_text})
-                return {
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": [response_text],
+                        "session_id": session_id
+                    }
+                )
         
         # Check for application updates
         app_update_keywords = ["update", "upgrade", "requires update", "needs update"]
@@ -987,11 +1014,14 @@ async def salesiq_webhook(request: dict):
             response_text = "Application updates need to be handled by our support team to avoid downtime. Please contact support at:\n\nPhone: 1-888-415-5240 (24/7)\nEmail: support@acecloudhosting.com\n\nThey'll schedule the update for you!"
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         
         # Check for option selections - INSTANT CHAT (with emoji matching)
         if ("instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or "📞" in message_text or payload == "option_1"):
@@ -1044,11 +1074,14 @@ async def salesiq_webhook(request: dict):
                 metrics_collector.end_conversation(session_id, "escalated")
                 del conversations[session_id]
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         
         # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
         if ("callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or "📅" in message_text or payload == "option_2"):
@@ -1076,11 +1109,14 @@ async def salesiq_webhook(request: dict):
             # Mark session as waiting for callback details
             conversations[session_id].append({"role": "system", "content": "WAITING_FOR_CALLBACK_DETAILS"})
 
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
             
         # Check if we are waiting for callback details
         if len(history) > 0 and history[-1].get("content") == "WAITING_FOR_CALLBACK_DETAILS":
@@ -1151,11 +1187,14 @@ async def salesiq_webhook(request: dict):
                 metrics_collector.end_conversation(session_id, "resolved")
                 del conversations[session_id]
 
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         
         # Note: Create Ticket option removed - only using Instant Chat and Schedule Callback
         # If user mentions "ticket", they'll be handled by agent via Instant Chat or Callback
@@ -1201,11 +1240,14 @@ async def salesiq_webhook(request: dict):
                 state_manager.end_session(session_id, ConversationState.ESCALATED)
                 del conversations[session_id]
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         # Check for agent connection requests - COMPREHENSIVE DETECTION
         agent_request_phrases = [
             # Direct agent requests
@@ -1242,23 +1284,26 @@ async def salesiq_webhook(request: dict):
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "suggestions": [
-                    {
-                        "text": "📞 Instant Chat",
-                        "action_type": "reply",
-                        "action_value": "1"
-                    },
-                    {
-                        "text": "📅 Schedule Callback",
-                        "action_type": "reply",
-                        "action_value": "2"
-                    },
-                ],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "suggestions": [
+                        {
+                            "text": "📞 Instant Chat",
+                            "action_type": "reply",
+                            "action_value": "1"
+                        },
+                        {
+                            "text": "📅 Schedule Callback",
+                            "action_type": "reply",
+                            "action_value": "2"
+                        },
+                    ],
+                    "session_id": session_id
+                }
+            )
         
         # Check for acknowledgments - BUT NOT during step-by-step troubleshooting
         def is_acknowledgment_message(msg):
@@ -1314,11 +1359,14 @@ async def salesiq_webhook(request: dict):
             logger.info(f"[SalesIQ] Acknowledgment detected (not in troubleshooting)")
             if message_lower in ["ok", "okay"]:
                 logger.info(f"[SalesIQ] 'Ok/Okay' alone, asking if need more help")
-                return {
-                    "action": "reply",
-                    "replies": ["Is there anything else I can help you with?"],
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": ["Is there anything else I can help you with?"],
+                        "session_id": session_id
+                    }
+                )
             elif is_final_goodbye:
                 # User is done - auto-close chat
                 logger.info(f"[Resolution] ✓ User signaled conversation complete")
@@ -1338,18 +1386,24 @@ async def salesiq_webhook(request: dict):
                     state_manager.end_session(session_id, ConversationState.RESOLVED)
                     del conversations[session_id]
                 
-                return {
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": [response_text],
+                        "session_id": session_id
+                    }
+                )
             else:
                 logger.info(f"[SalesIQ] Acknowledgment with thanks detected")
-                return {
-                    "action": "reply",
-                    "replies": ["You're welcome! Is there anything else I can help you with?"],
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": ["You're welcome! Is there anything else I can help you with?"],
+                        "session_id": session_id
+                    }
+                )
         elif is_acknowledgment and is_in_troubleshooting:
             logger.info(f"[SalesIQ] Acknowledgment during troubleshooting - continuing with LLM")
             # Fall through to LLM to continue with next step
@@ -1378,11 +1432,14 @@ async def salesiq_webhook(request: dict):
                         state_manager.end_session(session_id, ConversationState.RESOLVED)
                         del conversations[session_id]
                     
-                    return {
-                        "action": "reply",
-                        "replies": [response_text],
-                        "session_id": session_id
-                    }
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "action": "reply",
+                            "replies": [response_text],
+                            "session_id": session_id
+                        }
+                    )
         
         # Classify message category using IssueRouter (saves 60% of LLM tokens)
         category = issue_router.classify(message_text)
@@ -1459,12 +1516,15 @@ async def salesiq_webhook(request: dict):
                 conversations[session_id].append({"role": "user", "content": message_text})
                 conversations[session_id].append({"role": "assistant", "content": response_text})
                 
-                return {
-                    "action": "reply",
-                    "replies": [response_text],
-                    "suggestions": metadata.get("suggestions", []),
-                    "session_id": session_id
-                }
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "action": "reply",
+                        "replies": [response_text],
+                        "suggestions": metadata.get("suggestions", []),
+                        "session_id": session_id
+                    }
+                )
             
             # Check if we need to transfer
             if metadata.get("action") == "transfer_to_agent":
@@ -1548,11 +1608,14 @@ async def salesiq_webhook(request: dict):
             conversations[session_id].append({"role": "user", "content": message_text})
             conversations[session_id].append({"role": "assistant", "content": response_text})
             
-            return {
-                "action": "reply",
-                "replies": [response_text],
-                "session_id": session_id
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
         
         # No handler matched, continue with existing hardcoded logic or LLM
         logger.info(f"[Handler] No handler matched, continuing with existing logic")
@@ -1599,11 +1662,14 @@ async def salesiq_webhook(request: dict):
         conversations[session_id].append({"role": "user", "content": message_text})
         conversations[session_id].append({"role": "assistant", "content": response_text})
         
-        return {
-            "action": "reply",
-            "replies": [response_text],
-            "session_id": session_id
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "action": "reply",
+                "replies": [response_text],
+                "session_id": session_id
+            }
+        )
         
     except Exception as e:
         error_msg = str(e)
@@ -1627,11 +1693,14 @@ async def salesiq_webhook(request: dict):
         if session_id:
             metrics_collector.record_error(session_id)
         
-        return {
-            "action": "reply",
-            "replies": ["I'm having technical difficulties. Please call our support team at 1-888-415-5240."],
-            "session_id": session_id or 'unknown'
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "action": "reply",
+                "replies": ["I'm having technical difficulties. Please call our support team at 1-888-415-5240."],
+                "session_id": session_id or 'unknown'
+            }
+        )
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
