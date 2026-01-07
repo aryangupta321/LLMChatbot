@@ -149,17 +149,17 @@ class GeminiResponseGenerator:
             usage = response.usage
             if usage:
                 total_tokens = usage.prompt_tokens + usage.completion_tokens
-                logger.info(f\"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, {total_tokens} tokens\")
-                logger.debug(f\"[OpenRouter-Gemini] Token breakdown: {usage.prompt_tokens} input, {usage.completion_tokens} output\")
+                logger.info(f"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, {total_tokens} tokens")
+                logger.debug(f"[OpenRouter-Gemini] Token breakdown: {usage.prompt_tokens} input, {usage.completion_tokens} output")
             else:
                 # Fallback estimation if no usage data
                 total_tokens = (len(enhanced_prompt) + len(message)) // 4
-                logger.info(f\"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, ~{total_tokens} tokens (estimated)\")
+                logger.info(f"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, ~{total_tokens} tokens (estimated)")
             
             return response_text, total_tokens
             
         except Exception as e:
-            logger.error(f\"[OpenRouter-Gemini] Response generation failed: {e}\")
+            logger.error(f"[OpenRouter-Gemini] Response generation failed: {e}")
             
             # Fallback response
             fallback = (
