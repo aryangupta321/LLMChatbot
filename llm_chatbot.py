@@ -1,3 +1,6 @@
+"""
+Ace Cloud Hosting LLM Chatbot v3.0 - OpenRouter Edition
+"""
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -910,7 +913,7 @@ async def salesiq_webhook(request: dict):
                     "action": "reply",
                     "replies": [response_text],
                     "session_id": session_id
-                }
+                }ṇ
             )
         
         # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
@@ -927,7 +930,7 @@ async def salesiq_webhook(request: dict):
             
             response_text = (
                 "Perfect! I'm creating a callback request for you.\n\n"
-                "Please provide:\n"
+                "Please provide:\n"ṇ
                 "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
                 "2. Your phone number\n\n"
                 "Our support team will call you back at that time. A callback has been scheduled and you'll receive a confirmation email shortly.\n\n"
