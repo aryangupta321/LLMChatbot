@@ -913,7 +913,7 @@ async def salesiq_webhook(request: dict):
                     "action": "reply",
                     "replies": [response_text],
                     "session_id": session_id
-                }ṇ
+                }
             )
         
         # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
