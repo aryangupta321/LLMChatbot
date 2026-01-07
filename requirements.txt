@@ -2,6 +2,7 @@ pymupdf
 pandas
 python-dotenv
 openai>=1.0.0
+google-generativeai>=0.8.0
 pinecone-client>=3.0.0
 tqdm
 fastapi

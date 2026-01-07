@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 import os
 import asyncio
-from openai import OpenAI
 from dotenv import load_dotenv
 import urllib3
 import uvicorn
@@ -34,8 +33,18 @@ from services.state_manager import (
 # Import HandlerRegistry for pattern-based response handling
 from services.handler_registry import handler_registry
 
-# Import LLM Classifier for intelligent decision making
-from services.llm_classifier import llm_classifier, classify_resolution, classify_escalation, classify_intent, ClassificationResult
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GEMINI-POWERED: Using Gemini 2.5 Flash instead of GPT-4o-mini
+# Benefits: 1M context (no truncation!), 50% cheaper, faster
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+from services.gemini_classifier import (
+    gemini_classifier as llm_classifier,
+    classify_resolution,
+    classify_escalation,
+    classify_intent,
+    ClassificationResult
+)
+from services.gemini_generator import gemini_generator
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -121,7 +130,7 @@ def track_error(error_type: str, error_message: str, context: dict = None):
         )
         error_counts[error_type] = 0  # Reset counter
 
-app = FastAPI(title="Ace Cloud Hosting Support Bot - Hybrid", version="2.0.0")
+app = FastAPI(title="Ace Cloud Hosting Support Bot - Gemini", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -131,8 +140,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-LLM_MODEL = "gpt-4o-mini"
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GEMINI-POWERED: No more OpenAI client needed!
+# All LLM operations now use Gemini 2.5 Flash
+# Benefits: 1M context, no truncation, 50% cheaper, faster
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LLM_MODEL = "gemini-2.5-flash"  # Changed from gpt-4o-mini
 
 # Initialize IssueRouter for category classification
 issue_router = IssueRouter()
@@ -311,47 +324,48 @@ EXPERT_PROMPT = load_expert_prompt()
 logger.info(f"Expert prompt loaded successfully ({len(EXPERT_PROMPT)} characters)")
 
 def generate_response(message: str, history: List[Dict], category: str = "other") -> str:
-    """Generate response using LLM with embedded resolution steps
+    """Generate response using Gemini with FULL conversation context
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🚀 GEMINI-POWERED: No more truncation!
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    With 1M token context:
+    - Include FULL conversation history
+    - Bot remembers entire conversation
+    - Better troubleshooting continuity
+    - Higher resolution rates
     
     Args:
         message: User message text
-        history: Conversation history
-        category: Issue category from IssueRouter (login, quickbooks, performance, printing, office, other)
+        history: FULL conversation history (no truncation!)
+        category: Issue category from IssueRouter
     
     Returns:
-        LLM response text
+        Tuple of (response_text, tokens_used)
     """
     
-    # Add category hint to system prompt for better responses
-    category_hints = {
-        "login": "Focus on RDP connection, login issues, password resets, and SelfCare portal guidance.",
-        "quickbooks": "Focus on QuickBooks errors, company file issues, freezing/hanging, and QB-specific troubleshooting.",
-        "performance": "Focus on server performance, disk space, RAM/CPU usage, and system slowness.",
-        "printing": "Focus on printer redirection, printing issues, and RDP printer settings.",
-        "office": "Focus on Microsoft Office applications, Outlook, Excel, and Office 365 activation."
-    }
-    
-    system_prompt = EXPERT_PROMPT
-    if category != "other" and category in category_hints:
-        system_prompt = f"{EXPERT_PROMPT}\n\n[CATEGORY: {category.upper()}] {category_hints[category]}"
-        logger.info(f"Added category hint for: {category}")
-    
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history)
-    messages.append({"role": "user", "content": message})
-    
-    response = openai_client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=messages,
-        temperature=0.7,
-        max_tokens=400
-    )
-    
-    # Track token usage
-    tokens_used = response.usage.total_tokens if hasattr(response, 'usage') else 0
-    logger.debug(f"LLM call used {tokens_used} tokens")
-    
-    return response.choices[0].message.content, tokens_used
+    # Use Gemini generator with full history
+    if gemini_generator:
+        response_text, tokens_used = gemini_generator.generate_response(
+            message=message,
+            history=history,  # FULL history - no truncation!
+            system_prompt=EXPERT_PROMPT,
+            category=category
+        )
+        
+        logger.info(f"[Gemini] Response generated: {len(response_text)} chars, ~{tokens_used} tokens")
+        return response_text, tokens_used
+    else:
+        # Fallback if Gemini not available
+        logger.error("[Gemini] Generator not available - using fallback response")
+        fallback = (
+            "I apologize, but I'm having trouble processing your request right now. "
+            "Please try again, or contact our support team directly:\n\n"
+            "📞 Phone: 1-888-415-5240 (24/7)\n"
+            "📧 Email: support@acecloudhosting.com"
+        )
+        return fallback, 0
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
@@ -371,11 +385,14 @@ async def root():
     logger.info("Root endpoint accessed")
     return {
         "status": "online",
-        "service": "Ace Cloud Hosting Support Bot - Hybrid LLM",
-        "version": "2.0.0",
+        "service": "Ace Cloud Hosting Support Bot - Gemini Powered",
+        "version": "3.0.0",
+        "llm_engine": "gemini-2.5-flash",
+        "context_window": "1,000,000 tokens (no truncation)",
         "api_status": {
             "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
-            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False
+            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
+            "gemini_enabled": gemini_generator is not None
         },
         "endpoints": {
             "salesiq_webhook": "/webhook/salesiq",
@@ -392,11 +409,13 @@ async def health():
     return {
         "status": "healthy",
         "mode": "production",
-        "openai": "connected",
+        "llm": "gemini-2.5-flash",
+        "llm_status": "connected" if gemini_generator else "unavailable",
         "active_sessions": len(conversations),
         "api_status": {
             "salesiq_enabled": salesiq_api.enabled if hasattr(salesiq_api, 'enabled') else False,
-            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False
+            "desk_enabled": desk_api.enabled if hasattr(desk_api, 'enabled') else False,
+            "gemini_enabled": gemini_generator is not None
         },
         "webhook_url": "https://web-production-3032d.up.railway.app/webhook/salesiq"
     }
