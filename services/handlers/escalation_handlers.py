@@ -7,7 +7,8 @@ and problem acknowledgment. Uses LLM classification for intelligent intent detec
 
 from services.handlers.base import BaseHandler, HandlerResponse, check_keywords, check_exact_match
 from services.state_manager import ConversationState, TransitionTrigger
-from services.llm_classifier import classify_intent, classify_escalation
+# Use Gemini classifier instead of old OpenAI-based llm_classifier
+from services.gemini_classifier import classify_intent, classify_escalation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class ProblemNotResolvedHandler(BaseHandler):
     def handle(self, message: str, context: dict) -> HandlerResponse:
         logger.info(f"[ProblemNotResolvedHandler] Issue NOT resolved - offering escalation options")
         
-        response_text = "I understand this is frustrating. Here are 3 ways I can help:"
+        response_text = "I understand this is frustrating. Let me connect you with our team:"
         
         return HandlerResponse(
             text=response_text,
@@ -70,11 +71,6 @@ class ProblemNotResolvedHandler(BaseHandler):
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
-                    },
-                    {
-                        "text": "🎫 Create Support Ticket",
-                        "action_type": "reply",
-                        "action_value": "3"
                     }
                 ]
             }
@@ -135,11 +131,6 @@ class AgentRequestHandler(BaseHandler):
                         "text": "📅 Schedule Callback",
                         "action_type": "reply",
                         "action_value": "2"
-                    },
-                    {
-                        "text": "🎫 Create Support Ticket",
-                        "action_type": "reply",
-                        "action_value": "3"
                     }
                 ]
             }

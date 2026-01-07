@@ -159,7 +159,7 @@ class GeminiClassifier:
             return False
         return True
     
-    def _call_gemini(self, prompt: str, session_id: str = "unknown", max_tokens: int = 500) -> str:
+    def _call_gemini(self, prompt: str, session_id: str = "unknown", max_tokens: int = 1000) -> str:
         """
         Make Gemini API call with structured prompts.
         
@@ -174,8 +174,7 @@ class GeminiClassifier:
                 generation_config={
                     "temperature": 0.1,  # Low for consistent classification
                     "max_output_tokens": max_tokens,
-                    "response_mime_type": "application/json"  # Native JSON mode!
-                }
+                }  # Removed response_mime_type to avoid truncation issues
             )
             
             # Track approximate token usage (Gemini doesn't always return exact counts)
