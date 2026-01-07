@@ -993,8 +993,8 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for option selections - INSTANT CHAT
-        if "instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or payload == "option_1":
+        # Check for option selections - INSTANT CHAT (with emoji matching)
+        if ("instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or "📞" in message_text or payload == "option_1"):
             logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
             logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
             logger.info(f"[Action] Status: Connecting visitor to live agent...")
@@ -1050,8 +1050,8 @@ async def salesiq_webhook(request: dict):
                 "session_id": session_id
             }
         
-        # Check for option selections - SCHEDULE CALLBACK
-        if "callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or payload == "option_2":
+        # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
+        if ("callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or "📅" in message_text or payload == "option_2"):
             logger.info(f"[Action] ✅ BUTTON CLICKED: Schedule Callback (Option 2)")
             logger.info(f"[Action] 📞 CALLBACK SCHEDULED - Waiting for time & phone details")
             
