@@ -930,7 +930,7 @@ async def salesiq_webhook(request: dict):
             
             response_text = (
                 "Perfect! I'm creating a callback request for you.\n\n"
-                "Please provide:\n"ṇ
+                "Please provide:\n"
                 "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
                 "2. Your phone number\n\n"
                 "Our support team will call you back at that time. A callback has been scheduled and you'll receive a confirmation email shortly.\n\n"
