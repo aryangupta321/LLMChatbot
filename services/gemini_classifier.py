@@ -20,13 +20,13 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Import Gemini SDK
+# Import OpenAI SDK for OpenRouter
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMINI_AVAILABLE = False
-    logger.warning("google-generativeai not installed. Run: pip install google-generativeai")
+    OPENAI_AVAILABLE = False
+    logger.warning("openai not installed. Run: pip install openai")
 
 
 @dataclass
@@ -58,19 +58,21 @@ class GeminiClassifier:
     """
     
     def __init__(self):
-        if not GEMINI_AVAILABLE:
-            raise ImportError("google-generativeai package not installed")
+        if not OPENAI_AVAILABLE:
+            raise ImportError("openai package not installed")
         
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY not set in environment variables")
+            raise ValueError("OPENROUTER_API_KEY not set in environment variables")
         
-        # Configure Gemini
-        genai.configure(api_key=api_key)
+        # Configure OpenRouter with OpenAI SDK
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
         
-        # Use Gemini 2.5 Flash for speed + cost efficiency
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        self.model = genai.GenerativeModel(self.model_name)
+        # Use Gemini 2.5 Flash via OpenRouter
+        self.model_name = "google/gemini-2.5-flash"
         
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # GEMINI ADVANTAGES: These limits are now HUGE!
@@ -95,9 +97,10 @@ class GeminiClassifier:
         self.session_token_usage: Dict[str, int] = {}
         
         logger.info("=" * 60)
-        logger.info("🚀 GEMINI CLASSIFIER INITIALIZED")
+        logger.info("🚀 GEMINI CLASSIFIER INITIALIZED (via OpenRouter)")
         logger.info("=" * 60)
         logger.info(f"  Model: {self.model_name}")
+        logger.info(f"  Base URL: https://openrouter.ai/api/v1")
         logger.info(f"  Context Window: 1,000,000 tokens (NO TRUNCATION!)")
         logger.info(f"  Max Output: 65,000 tokens")
         logger.info(f"  Max per Conversation: {self.max_tokens_per_conversation:,} tokens")
@@ -169,36 +172,30 @@ class GeminiClassifier:
         - Lower cost per token
         """
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,  # Low for consistent classification
-                    "max_output_tokens": max_tokens,
-                }  # Removed response_mime_type to avoid truncation issues
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that responds in JSON format."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,  # Low for consistent classification
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"}  # Force JSON output
             )
             
-            # Track approximate token usage (Gemini doesn't always return exact counts)
-            # Rough estimate: 1 token ≈ 4 characters
-            input_tokens = len(prompt) // 4
-            output_tokens = len(response.text) // 4 if response.text else 0
+            # Track token usage from OpenRouter
+            usage = response.usage
+            if usage:
+                input_tokens = usage.prompt_tokens
+                output_tokens = usage.completion_tokens
+                self._track_token_usage(session_id, input_tokens + output_tokens)
+                logger.debug(f"[OpenRouter-Gemini] Tokens: {input_tokens} in, {output_tokens} out, Session total: {self.session_token_usage.get(session_id, 0):,}")
             
-            self._track_token_usage(session_id, input_tokens + output_tokens)
-            
-            logger.debug(f"[Gemini] Tokens: ~{input_tokens} in, ~{output_tokens} out, Session total: {self.session_token_usage.get(session_id, 0):,}")
-            
-            # Strip markdown code fences if present (Gemini sometimes returns ```json...```)
-            response_text = response.text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]  # Remove ```json
-            if response_text.startswith("```"):
-                response_text = response_text[3:]  # Remove ```
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]  # Remove trailing ```
-            
-            return response_text.strip()
+            response_text = response.choices[0].message.content.strip()
+            return response_text
             
         except Exception as e:
-            logger.error(f"[Gemini] API call failed: {e}")
+            logger.error(f"[OpenRouter-Gemini] API call failed: {e}")
             raise
     
     def classify_unified(self, message: str, conversation_history: List[Dict], 
@@ -417,7 +414,7 @@ Respond with valid JSON only:
 try:
     gemini_classifier = GeminiClassifier()
     llm_classifier = gemini_classifier  # Alias for backward compatibility
-    logger.info("✅ Gemini Classifier is ACTIVE (replacing GPT-4o-mini)")
+    logger.info("✅ Gemini Classifier is ACTIVE via OpenRouter (replacing GPT-4o-mini)")
 except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini Classifier: {e}")
     gemini_classifier = None

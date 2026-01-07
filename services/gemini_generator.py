@@ -20,13 +20,13 @@ from typing import List, Dict, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
-# Import Gemini SDK
+# Import OpenAI SDK for OpenRouter
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMINI_AVAILABLE = False
-    logger.warning("google-generativeai not installed. Run: pip install google-generativeai")
+    OPENAI_AVAILABLE = False
+    logger.warning("openai not installed. Run: pip install openai")
 
 
 class GeminiResponseGenerator:
@@ -47,36 +47,33 @@ class GeminiResponseGenerator:
     """
     
     def __init__(self):
-        if not GEMINI_AVAILABLE:
-            raise ImportError("google-generativeai package not installed")
+        if not OPENAI_AVAILABLE:
+            raise ImportError("openai package not installed")
         
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY not set in environment variables")
+            raise ValueError("OPENROUTER_API_KEY not set in environment variables")
         
-        # Configure Gemini
-        genai.configure(api_key=api_key)
+        # Configure OpenRouter with OpenAI SDK
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
         
-        # Use Gemini 2.5 Flash for speed + cost efficiency
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        self.model = genai.GenerativeModel(self.model_name)
+        # Use Gemini 2.5 Flash via OpenRouter
+        self.model_name = "google/gemini-2.5-flash"
         
         # Generation settings - can be higher with Gemini!
         self.default_temperature = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
         self.default_max_tokens = int(os.getenv("GEMINI_MAX_TOKENS", "1000"))  # Was 400!
         
         # Safety settings (optional)
-        self.safety_settings = {
-            "HARASSMENT": "BLOCK_NONE",
-            "HATE_SPEECH": "BLOCK_NONE",
-            "SEXUALLY_EXPLICIT": "BLOCK_NONE",
-            "DANGEROUS_CONTENT": "BLOCK_NONE",
-        }
         
         logger.info("=" * 60)
-        logger.info("🚀 GEMINI RESPONSE GENERATOR INITIALIZED")
+        logger.info("🚀 GEMINI RESPONSE GENERATOR INITIALIZED (via OpenRouter)")
         logger.info("=" * 60)
         logger.info(f"  Model: {self.model_name}")
+        logger.info(f"  Base URL: https://openrouter.ai/api/v1")
         logger.info(f"  Temperature: {self.default_temperature}")
         logger.info(f"  Max Tokens: {self.default_max_tokens}")
         logger.info(f"  Context: 1,000,000 tokens (NO TRUNCATION!)")
@@ -120,49 +117,49 @@ class GeminiResponseGenerator:
             enhanced_prompt = f"{system_prompt}\n\n[CATEGORY: {category.upper()}] {category_hints[category]}"
             logger.info(f"[Gemini] Added category hint for: {category}")
         
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # Build conversation - Include FULL history (no truncation!)
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
-        # Build conversation context
-        conversation_text = f"SYSTEM INSTRUCTIONS:\n{enhanced_prompt}\n\n"
-        conversation_text += "CONVERSATION HISTORY (COMPLETE):\n"
-        conversation_text += "=" * 50 + "\n"
+        # Build messages array for OpenAI format
+        messages = [
+            {\"role\": \"system\", \"content\": enhanced_prompt}
+        ]
         
+        # Add full conversation history
         for msg in history:
-            role = "USER" if msg.get("role") == "user" else "ASSISTANT"
-            content = msg.get("content", "")
-            conversation_text += f"{role}: {content}\n\n"
+            role = \"user\" if msg.get(\"role\") == \"user\" else \"assistant\"
+            content = msg.get(\"content\", \"\")
+            messages.append({\"role\": role, \"content\": content})
         
-        conversation_text += "=" * 50 + "\n"
-        conversation_text += f"CURRENT USER MESSAGE:\n{message}\n\n"
-        conversation_text += "YOUR RESPONSE:"
+        # Add current message
+        messages.append({\"role\": \"user\", \"content\": message})
         
         try:
-            response = self.model.generate_content(
-                conversation_text,
-                generation_config={
-                    "temperature": temp,
-                    "max_output_tokens": max_tok,
-                }
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=temp,
+                max_tokens=max_tok,
             )
             
             # Extract response text
-            response_text = response.text.strip() if response.text else ""
+            response_text = response.choices[0].message.content.strip()
             
-            # Estimate token usage (Gemini doesn't always return exact counts)
-            # Rough estimate: 1 token ≈ 4 characters
-            input_tokens = len(conversation_text) // 4
-            output_tokens = len(response_text) // 4
-            total_tokens = input_tokens + output_tokens
-            
-            logger.info(f"[Gemini] Response generated: {len(response_text)} chars, ~{total_tokens} tokens")
-            logger.debug(f"[Gemini] Token breakdown: ~{input_tokens} input, ~{output_tokens} output")
+            # Get actual token usage from OpenRouter
+            usage = response.usage
+            if usage:
+                total_tokens = usage.prompt_tokens + usage.completion_tokens
+                logger.info(f\"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, {total_tokens} tokens\")
+                logger.debug(f\"[OpenRouter-Gemini] Token breakdown: {usage.prompt_tokens} input, {usage.completion_tokens} output\")
+            else:
+                # Fallback estimation if no usage data
+                total_tokens = (len(enhanced_prompt) + len(message)) // 4
+                logger.info(f\"[OpenRouter-Gemini] Response generated: {len(response_text)} chars, ~{total_tokens} tokens (estimated)\")
             
             return response_text, total_tokens
             
         except Exception as e:
-            logger.error(f"[Gemini] Response generation failed: {e}")
+            logger.error(f\"[OpenRouter-Gemini] Response generation failed: {e}\")
             
             # Fallback response
             fallback = (
