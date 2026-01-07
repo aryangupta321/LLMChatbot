@@ -122,17 +122,17 @@ class GeminiResponseGenerator:
         
         # Build messages array for OpenAI format
         messages = [
-            {\"role\": \"system\", \"content\": enhanced_prompt}
+            {"role": "system", "content": enhanced_prompt}
         ]
         
         # Add full conversation history
         for msg in history:
-            role = \"user\" if msg.get(\"role\") == \"user\" else \"assistant\"
-            content = msg.get(\"content\", \"\")
-            messages.append({\"role\": role, \"content\": content})
+            role = "user" if msg.get("role") == "user" else "assistant"
+            content = msg.get("content", "")
+            messages.append({"role": role, "content": content})
         
         # Add current message
-        messages.append({\"role\": \"user\", \"content\": message})
+        messages.append({"role": "user", "content": message})
         
         try:
             response = self.client.chat.completions.create(
