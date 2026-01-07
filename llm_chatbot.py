@@ -829,6 +829,185 @@ async def salesiq_webhook(request: dict):
                     }
         
         # ============================================================
+        # BUTTON HANDLERS - CHECK FIRST (Priority over LLM classification)
+        # ============================================================
+        # These must run BEFORE LLM classification to prevent escalation loop
+        # When user clicks a button, handle it immediately without LLM analysis
+        
+        # Check for option selections - INSTANT CHAT (with emoji matching)
+        if ("instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or "📞" in message_text or payload == "option_1"):
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
+            logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
+            logger.info(f"[Action] Status: Connecting visitor to live agent...")
+            
+            try:
+                # Build past_messages in SalesIQ format (message-by-message)
+                past_messages = build_past_messages(history)
+                
+                # Build conversation history text as fallback
+                conversation_text = ""
+                for msg in history:
+                    role = "User" if msg.get('role') == 'user' else "Bot"
+                    conversation_text += f"{role}: {msg.get('content', '')}\n"
+                
+                # Prepare overrides from webhook payload
+                req_meta = request.get('request', {}) if isinstance(request, dict) else {}
+                override_app_id = req_meta.get('app_id') or getattr(salesiq_api, 'app_id', None)
+                override_department_id = visitor.get('department_id') if isinstance(visitor, dict) else None
+                
+                # Extract visitor email as unique identifier (more reliable than IDs)
+                visitor_email = visitor.get('email', 'support@acecloudhosting.com') if isinstance(visitor, dict) else 'support@acecloudhosting.com'
+                
+                # Call SalesIQ API (Visitor API) to create conversation and route to agent
+                logger.info(f"[SalesIQ] Calling create_chat_session API with overrides app_id={override_app_id}, dept={override_department_id}, visitor_email={visitor_email}")
+                logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent (message-by-message)")
+                
+                # Pass visitor email as user_id (most reliable unique identifier per API docs)
+                api_result = salesiq_api.create_chat_session(
+                    visitor_email,  # Use email as unique user_id per API documentation
+                    conversation_history=conversation_text,
+                    past_messages=past_messages
+                )
+                logger.info(f"[SalesIQ] API result: {api_result}")
+            except Exception as api_error:
+                logger.error(f"[SalesIQ] API call failed: {str(api_error)}")
+                logger.error(f"[SalesIQ] Traceback: {traceback.format_exc()}")
+            
+            # SalesIQ webhooks only support "reply" action, not "transfer"
+            # The transfer happens through the SalesIQ API call above
+            # Send confirmation message to user
+            response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
+            
+            logger.info(f"[Action] ✓ TRANSFER CONFIRMATION SENT")
+            
+            # Clear conversation after transfer
+            if session_id in conversations:
+                metrics_collector.end_conversation(session_id, "escalated")
+                del conversations[session_id]
+            
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
+        
+        # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
+        if ("callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or "📅" in message_text or payload == "option_2"):
+            logger.info(f"[Action] ✅ BUTTON CLICKED: Schedule Callback (Option 2)")
+            logger.info(f"[Action] 📞 CALLBACK SCHEDULED - Waiting for time & phone details")
+            
+            # Transition to callback collection state
+            state_manager.transition(session_id, TransitionTrigger.CALLBACK_REQUESTED)
+            
+            # Extract visitor info
+            visitor_email = visitor.get("email", "support@acecloudhosting.com")
+            visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
+            
+            response_text = (
+                "Perfect! I'm creating a callback request for you.\n\n"
+                "Please provide:\n"
+                "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
+                "2. Your phone number\n\n"
+                "Our support team will call you back at that time. A callback has been scheduled and you'll receive a confirmation email shortly.\n\n"
+                "Thank you for contacting Ace Cloud Hosting!"
+            )
+            conversations[session_id].append({"role": "user", "content": message_text})
+            conversations[session_id].append({"role": "assistant", "content": response_text})
+            
+            # Mark session as waiting for callback details
+            conversations[session_id].append({"role": "system", "content": "WAITING_FOR_CALLBACK_DETAILS"})
+
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
+            
+        # Check if we are waiting for callback details
+        if len(history) > 0 and history[-1].get("content") == "WAITING_FOR_CALLBACK_DETAILS":
+            logger.info(f"[SalesIQ] Received callback details: {message_text}")
+            
+            # Remove the system marker
+            history.pop()
+            
+            # Extract visitor info
+            visitor_email = visitor.get("email", "support@acecloudhosting.com")
+            visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
+
+            # Best-effort parse for phone / preferred time
+            import re
+            phone_match = re.search(r"\b(?:\+?\d[\d\s-]{8,}\d)\b", message_text)
+            phone = phone_match.group(0).strip() if phone_match else None
+
+            time_match = re.search(r"(?i)\btime\b\s*[:=-]\s*(.+)", message_text)
+            preferred_time = time_match.group(1).strip() if time_match else None
+            
+            # Add user's details to history
+            conversations[session_id].append({"role": "user", "content": message_text})
+            
+            # Create the callback ticket NOW with the details
+            try:
+                # Get conversation history including the details provided
+                conv_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversations.get(session_id, [])])
+                
+                # Append the specific details to the description
+                full_description = f"{conv_history}\n\nUSER PROVIDED DETAILS:\n{message_text}"
+                
+                api_result = desk_api.create_callback_ticket(
+                    visitor_email=visitor_email,
+                    visitor_name=visitor_name,
+                    conversation_history=full_description,
+                    preferred_time=preferred_time,
+                    phone=phone,
+                )
+                logger.info(f"[Desk] Callback call result: {api_result}")
+            except Exception as e:
+                logger.error(f"[Desk] Callback call error: {str(e)}")
+                api_result = {"success": False, "error": "exception", "details": str(e)}
+
+            if api_result.get("success"):
+                logger.info(f"[Action] ✓ CALLBACK TICKET CREATED SUCCESSFULLY")
+                logger.info(f"[Action] 📞 Callback scheduled for visitor: {visitor.get('name', 'Unknown')}")
+                logger.info(f"[Action] Email: {visitor.get('email', 'Not provided')}")
+                response_text = "Thank you! I've received your details and scheduled the callback. Our team will contact you shortly. Have a great day!"
+            else:
+                logger.warning(f"[Action] ✗ CALLBACK TICKET CREATION FAILED")
+                logger.warning(f"[Action] Error: {api_result.get('error', 'Unknown error')}")
+                response_text = (
+                    "I got your details, but I couldn't create the callback in our system right now. "
+                    "Please call our support team at 1-888-415-5240 for immediate help."
+                )
+            
+            # Only close the chat if callback creation succeeded
+            if api_result.get("success"):
+                try:
+                    close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
+                    logger.info(f"[SalesIQ] Chat closure result: {close_result}")
+                except Exception as e:
+                    logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
+
+            # Clear conversation only after success
+            if api_result.get("success") and session_id in conversations:
+                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Callback Scheduled")
+                metrics_collector.end_conversation(session_id, "resolved")
+                del conversations[session_id]
+
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": [response_text],
+                    "session_id": session_id
+                }
+            )
+        
+        # ============================================================
         # OPTIMIZED LLM CLASSIFICATION (1 API call instead of 3)
         # ============================================================
         # Use unified classification to analyze resolution + escalation + intent in single call
@@ -1023,231 +1202,6 @@ async def salesiq_webhook(request: dict):
                 }
             )
         
-        # Check for option selections - INSTANT CHAT (with emoji matching)
-        if ("instant chat" in message_lower or "option 1" in message_lower or message_lower == "1" or "chat/transfer" in message_lower or "📞" in message_text or payload == "option_1"):
-            logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
-            logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
-            logger.info(f"[Action] Status: Connecting visitor to live agent...")
-            
-            try:
-                # Build past_messages in SalesIQ format (message-by-message)
-                past_messages = build_past_messages(history)
-                
-                # Build conversation history text as fallback
-                conversation_text = ""
-                for msg in history:
-                    role = "User" if msg.get('role') == 'user' else "Bot"
-                    conversation_text += f"{role}: {msg.get('content', '')}\n"
-                
-                # Prepare overrides from webhook payload
-                req_meta = request.get('request', {}) if isinstance(request, dict) else {}
-                override_app_id = req_meta.get('app_id') or getattr(salesiq_api, 'app_id', None)
-                override_department_id = visitor.get('department_id') if isinstance(visitor, dict) else None
-                
-                # Extract visitor email as unique identifier (more reliable than IDs)
-                visitor_email = visitor.get('email', 'support@acecloudhosting.com') if isinstance(visitor, dict) else 'support@acecloudhosting.com'
-                
-                # Call SalesIQ API (Visitor API) to create conversation and route to agent
-                logger.info(f"[SalesIQ] Calling create_chat_session API with overrides app_id={override_app_id}, dept={override_department_id}, visitor_email={visitor_email}")
-                logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent (message-by-message)")
-                
-                # Pass visitor email as user_id (most reliable unique identifier per API docs)
-                api_result = salesiq_api.create_chat_session(
-                    visitor_email,  # Use email as unique user_id per API documentation
-                    conversation_history=conversation_text,
-                    past_messages=past_messages
-                )
-                logger.info(f"[SalesIQ] API result: {api_result}")
-            except Exception as api_error:
-                logger.error(f"[SalesIQ] API call failed: {str(api_error)}")
-                logger.error(f"[SalesIQ] Traceback: {traceback.format_exc()}")
-            
-            # SalesIQ webhooks only support "reply" action, not "transfer"
-            # The transfer happens through the SalesIQ API call above
-            # Send confirmation message to user
-            response_text = "I'm connecting you with our support team. If the transfer doesn't happen automatically, please call 1-888-415-5240 or email support@acecloudhosting.com for immediate assistance."
-            
-            logger.info(f"[Action] ✓ TRANSFER CONFIRMATION SENT")
-            
-            # Clear conversation after transfer
-            if session_id in conversations:
-                metrics_collector.end_conversation(session_id, "escalated")
-                del conversations[session_id]
-            
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
-            )
-        
-        # Check for option selections - SCHEDULE CALLBACK (with emoji matching)
-        if ("callback" in message_lower or "option 2" in message_lower or message_lower == "2" or "schedule" in message_lower or "📅" in message_text or payload == "option_2"):
-            logger.info(f"[Action] ✅ BUTTON CLICKED: Schedule Callback (Option 2)")
-            logger.info(f"[Action] 📞 CALLBACK SCHEDULED - Waiting for time & phone details")
-            
-            # Transition to callback collection state
-            state_manager.transition(session_id, TransitionTrigger.CALLBACK_REQUESTED)
-            
-            # Extract visitor info
-            visitor_email = visitor.get("email", "support@acecloudhosting.com")
-            visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
-            
-            response_text = (
-                "Perfect! I'm creating a callback request for you.\n\n"
-                "Please provide:\n"
-                "1. Your preferred time (e.g., 'tomorrow at 2 PM' or 'Monday morning')\n"
-                "2. Your phone number\n\n"
-                "Our support team will call you back at that time. A callback has been scheduled and you'll receive a confirmation email shortly.\n\n"
-                "Thank you for contacting Ace Cloud Hosting!"
-            )
-            conversations[session_id].append({"role": "user", "content": message_text})
-            conversations[session_id].append({"role": "assistant", "content": response_text})
-            
-            # Mark session as waiting for callback details
-            conversations[session_id].append({"role": "system", "content": "WAITING_FOR_CALLBACK_DETAILS"})
-
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
-            )
-            
-        # Check if we are waiting for callback details
-        if len(history) > 0 and history[-1].get("content") == "WAITING_FOR_CALLBACK_DETAILS":
-            logger.info(f"[SalesIQ] Received callback details: {message_text}")
-            
-            # Remove the system marker
-            history.pop()
-            
-            # Extract visitor info
-            visitor_email = visitor.get("email", "support@acecloudhosting.com")
-            visitor_name = visitor.get("name", visitor_email.split("@")[0] if visitor_email else "Chat User")
-
-            # Best-effort parse for phone / preferred time
-            import re
-            phone_match = re.search(r"\b(?:\+?\d[\d\s-]{8,}\d)\b", message_text)
-            phone = phone_match.group(0).strip() if phone_match else None
-
-            time_match = re.search(r"(?i)\btime\b\s*[:=-]\s*(.+)", message_text)
-            preferred_time = time_match.group(1).strip() if time_match else None
-            
-            # Add user's details to history
-            conversations[session_id].append({"role": "user", "content": message_text})
-            
-            # Create the callback ticket NOW with the details
-            try:
-                # Get conversation history including the details provided
-                conv_history = "\n".join([f"{msg['role']}: {msg['content']}" for msg in conversations.get(session_id, [])])
-                
-                # Append the specific details to the description
-                full_description = f"{conv_history}\n\nUSER PROVIDED DETAILS:\n{message_text}"
-                
-                api_result = desk_api.create_callback_ticket(
-                    visitor_email=visitor_email,
-                    visitor_name=visitor_name,
-                    conversation_history=full_description,
-                    preferred_time=preferred_time,
-                    phone=phone,
-                )
-                logger.info(f"[Desk] Callback call result: {api_result}")
-            except Exception as e:
-                logger.error(f"[Desk] Callback call error: {str(e)}")
-                api_result = {"success": False, "error": "exception", "details": str(e)}
-
-            if api_result.get("success"):
-                logger.info(f"[Action] ✓ CALLBACK TICKET CREATED SUCCESSFULLY")
-                logger.info(f"[Action] 📞 Callback scheduled for visitor: {visitor.get('name', 'Unknown')}")
-                logger.info(f"[Action] Email: {visitor.get('email', 'Not provided')}")
-                response_text = "Thank you! I've received your details and scheduled the callback. Our team will contact you shortly. Have a great day!"
-            else:
-                logger.warning(f"[Action] ✗ CALLBACK TICKET CREATION FAILED")
-                logger.warning(f"[Action] Error: {api_result.get('error', 'Unknown error')}")
-                response_text = (
-                    "I got your details, but I couldn't create the callback in our system right now. "
-                    "Please call our support team at 1-888-415-5240 for immediate help."
-                )
-            
-            # Only close the chat if callback creation succeeded
-            if api_result.get("success"):
-                try:
-                    close_result = salesiq_api.close_chat(session_id, "callback_scheduled")
-                    logger.info(f"[SalesIQ] Chat closure result: {close_result}")
-                except Exception as e:
-                    logger.error(f"[SalesIQ] Chat closure error: {str(e)}")
-
-            # Clear conversation only after success
-            if api_result.get("success") and session_id in conversations:
-                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Callback Scheduled")
-                metrics_collector.end_conversation(session_id, "resolved")
-                del conversations[session_id]
-
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
-            )
-        
-        # Note: Create Ticket option removed - only using Instant Chat and Schedule Callback
-        # If user mentions "ticket", they'll be handled by agent via Instant Chat or Callback
-        if "ticket" in message_lower or "option 3" in message_lower or message_lower == "3" or "support ticket" in message_lower or payload == "option_3":
-            logger.info(f"[Action] 📞 Ticket request handled via Instant Chat or Callback")
-            # Redirect to Instant Chat as primary option
-            logger.info(f"[Action] ✅ BUTTON CLICKED: Instant Chat (Option 1)")
-            logger.info(f"[Action] 🔄 CHAT TRANSFER INITIATED")
-            logger.info(f"[Action] Status: Connecting visitor to live agent...")
-            
-            # Transition to chat transfer state
-            state_manager.transition(session_id, TransitionTrigger.ESCALATION_REQUESTED)
-            
-            # Build past_messages in SalesIQ format (message-by-message)
-            past_messages = build_past_messages(history)
-            
-            # Build conversation history text as fallback
-            conversation_text = ""
-            for msg in history:
-                role = "Visitor" if msg.get('role') == 'user' else "Bot"
-                conversation_text += f"{role}: {msg.get('content', '')}\n"
-            
-            # Call SalesIQ API for chat transfer with structured history
-            logger.info(f"[SalesIQ] Transferring {len(past_messages)} messages to agent")
-            api_result = salesiq_api.create_chat_session(
-                session_id, 
-                conversation_history=conversation_text,
-                past_messages=past_messages
-            )
-            logger.info(f"[SalesIQ] Chat transfer API result: {api_result}")
-            
-            response_text = "I'm connecting you with our support team now. They'll be able to create a ticket or assist you directly."
-            conversations[session_id].append({"role": "user", "content": message_text})
-            conversations[session_id].append({"role": "assistant", "content": response_text})
-            
-            if api_result.get("success"):
-                logger.info(f"[Action] ✓ TRANSFER CONFIRMATION SENT")
-            
-            # Clear conversation after transfer
-            if session_id in conversations:
-                logger.info(f"[Metrics] 📊 CONVERSATION ENDED - Reason: Agent Transfer")
-                metrics_collector.end_conversation(session_id, "escalated")
-                state_manager.end_session(session_id, ConversationState.ESCALATED)
-                del conversations[session_id]
-            
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "action": "reply",
-                    "replies": [response_text],
-                    "session_id": session_id
-                }
-            )
         # Check for agent connection requests - COMPREHENSIVE DETECTION
         agent_request_phrases = [
             # Direct agent requests
