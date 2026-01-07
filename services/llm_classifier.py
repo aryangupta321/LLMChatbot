@@ -157,7 +157,6 @@ class LLMClassifier:
                 temperature=0.1,  # Low temperature for consistent classification
                 max_tokens=150  # Keep responses short for classification
             )
-            )
             
             # Track output tokens
             output_tokens = response.usage.completion_tokens if hasattr(response, 'usage') else 150
