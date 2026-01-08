@@ -1151,8 +1151,8 @@ async def salesiq_webhook(request: dict):
                 }
             )
         
-        # Check for password reset - improved flow
-        password_keywords = ["password", "reset", "forgot", "locked out"]
+        # Check for password reset - improved flow with multiple options
+        password_keywords = ["password", "reset", "forgot", "locked out", "can't login", "cannot login"]
         if any(keyword in message_lower for keyword in password_keywords):
             logger.info(f"[SalesIQ] Password reset detected")
             # Check if user already answered about SelfCare registration
@@ -1175,8 +1175,13 @@ async def salesiq_webhook(request: dict):
                             }
                         )
                     elif 'no' in message_lower or 'not registered' in message_lower:
-                        logger.info(f"[SalesIQ] User is NOT registered on SelfCare")
-                        response_text = "No problem! For server/user account password reset, please contact our support team at 1-888-415-5240. They'll help you right away!"
+                        logger.info(f"[SalesIQ] User is NOT registered on SelfCare - providing POC option")
+                        response_text = (
+                            "No problem! For server/user account password reset, you have two options:\n\n"
+                            "1. Contact your account's POC (Point of Contact) or admin - they can reset your password through MyPortal\n"
+                            "2. Call our support team at 1-888-415-5240 (24/7)\n\n"
+                            "Which option works better for you?"
+                        )
                         conversations[session_id].append({"role": "user", "content": message_text})
                         conversations[session_id].append({"role": "assistant", "content": response_text})
                         return JSONResponse(
@@ -1356,7 +1361,7 @@ async def salesiq_webhook(request: dict):
                 close_result = salesiq_api.close_chat(session_id, "completed")
                 if close_result.get('success'):
                     logger.info(f"[Action] ✓ CHAT AUTO-CLOSED SUCCESSFULLY")
-                
+                ṇ
                 if session_id in conversations:
                     metrics_collector.end_conversation(session_id, "resolved")
                     state_manager.end_session(session_id, ConversationState.RESOLVED)
