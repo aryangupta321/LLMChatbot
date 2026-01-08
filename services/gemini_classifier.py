@@ -71,8 +71,8 @@ class GeminiClassifier:
             api_key=api_key,
         )
         
-        # Use Gemini 2.5 Flash via OpenRouter
-        self.model_name = "google/gemini-2.5-flash"
+        # Use Gemini 2.5 Flash Lite via OpenRouter (cheaper than Flash)
+        self.model_name = "google/gemini-2.5-flash-lite"
         
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # GEMINI ADVANTAGES: These limits are now HUGE!
