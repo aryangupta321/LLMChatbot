@@ -567,7 +567,33 @@ async def test_widget():
 
 @app.post("/webhook/salesiq")
 async def salesiq_webhook(request: dict):
-    """Direct webhook endpoint for Zoho SalesIQ - Hybrid LLM"""
+    """
+    Direct webhook endpoint for Zoho SalesIQ - Hybrid LLM
+    
+    CRITICAL: This function MUST ALWAYS return a JSONResponse with proper format.
+    If ANY exception occurs, we return a fallback response to prevent SalesIQ errors.
+    """
+    session_id = None
+    
+    # OUTER TRY-CATCH: Catches absolutely everything including JSON encoding errors
+    try:
+        return await _salesiq_webhook_inner(request)
+    except Exception as outer_e:
+        logger.critical(f"[CRITICAL] Outer exception in webhook: {outer_e}")
+        logger.critical(f"[CRITICAL] Traceback: {traceback.format_exc()}")
+        
+        # GUARANTEED fallback response - this should NEVER fail
+        return JSONResponse(
+            status_code=200,
+            content={
+                "action": "reply",
+                "replies": ["I'm experiencing technical difficulties. Please call 1-888-415-5240."],
+                "session_id": "error"
+            }
+        )
+
+async def _salesiq_webhook_inner(request: dict):
+    """Inner webhook handler with normal exception handling"""
     session_id = None
     try:
         # Set session context for logging (will be updated once extracted)
@@ -583,11 +609,14 @@ async def salesiq_webhook(request: dict):
                 f"Received non-dict webhook: {type(request)}",
                 {"request_type": str(type(request))}
             )
-            return {
-                "action": "reply",
-                "replies": ["I'm having technical difficulties. Please call 1-888-415-5240."],
-                "session_id": "unknown"
-            }
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "action": "reply",
+                    "replies": ["I'm having technical difficulties. Please call 1-888-415-5240."],
+                    "session_id": "unknown"
+                }
+            )
         
         logger.info(f"[SalesIQ] Request keys: {list(request.keys())}")
         logger.debug(f"[SalesIQ] Full request payload: {request}")
@@ -844,11 +873,14 @@ async def salesiq_webhook(request: dict):
                         metrics_collector.end_conversation(session_id, "resolved")
                         state_manager.end_session(session_id, ConversationState.RESOLVED)
                     
-                    return {
-                        "action": "reply",
-                        "replies": [response_text],
-                        "session_id": session_id
-                    }
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "action": "reply",
+                            "replies": [response_text],
+                            "session_id": session_id
+                        }
+                    )
         
         # ============================================================
         # BUTTON HANDLERS - CHECK FIRST (Priority over LLM classification)
