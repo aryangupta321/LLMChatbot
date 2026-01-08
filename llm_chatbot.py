@@ -654,26 +654,9 @@ async def _salesiq_webhook_inner(request: dict):
         visitor_email = visitor.get('email', 'No email')
         visitor_phone = visitor.get('phone', 'No phone')
         
-        # Log comprehensive ID mapping for close API
-        logger.info("=" * 80)
-        logger.info("SALESIQ WEBHOOK PAYLOAD - CONVERSATION ID MAPPING")
-        logger.info("=" * 80)
-        logger.info(f"Timestamp: {datetime.now().isoformat()}")
-        logger.info(f"Visitor Info:")
-        logger.info(f"  - Name: {visitor_name}")
-        logger.info(f"  - Email: {visitor_email}")
-        logger.info(f"  - Phone: {visitor_phone}")
-        logger.info(f"")
-        logger.info(f"ID Extraction:")
-        logger.info(f"  - salesiq_conversation_id: {salesiq_conversation_id}")
-        logger.info(f"  - salesiq_chat_id: {salesiq_chat_id}")
-        logger.info(f"  - salesiq_visitor_id: {salesiq_visitor_id}")
-        logger.info(f"  - salesiq_active_conversation: {salesiq_active_conversation}")
-        logger.info(f"")
-        logger.info(f"Message Details:")
-        if message_timestamp:
-            logger.info(f"  - Message Time: {message_timestamp}")
-        logger.info(f"  - Text: {message_text_preview[:200] if message_text_preview else '(empty)'}")
+        # Simple logging for debugging
+        logger.info(f"[SalesIQ] Message: {message_text_preview[:100] if message_text_preview else '(empty)'}")
+        logger.debug(f"[SalesIQ] Visitor: {visitor_email}, Active Conv: {salesiq_active_conversation}")
         
         # Extract payload (from quick reply buttons)
         payload = request.get('payload', '')
@@ -687,19 +670,9 @@ async def _salesiq_webhook_inner(request: dict):
             salesiq_chat_id
         )
         
-        if api_conversation_id:
-            screen_name = os.getenv('SALESIQ_SCREEN_NAME', 'rtdsportal')
-            close_api_endpoint = f"POST /api/v2/{screen_name}/conversations/{api_conversation_id}/close"
-            logger.info(f"")
-            logger.info(f"API CLOSE ENDPOINT:")
-            logger.info(f"  {close_api_endpoint}")
-            logger.info(f"")
-            logger.info(f"Full URL:")
-            logger.info(f"  https://salesiq.zohopublic.in/api/v2/{screen_name}/conversations/{api_conversation_id}/close")
-        else:
-            logger.warning(f"NO CONVERSATION ID FOUND - Cannot construct close API endpoint")
-        
-        logger.info("=" * 80)
+        # Store conversation ID for potential API operations
+        if not api_conversation_id:
+            logger.warning(f"[SalesIQ] No conversation ID found for API operations")
         
         # Extract session ID (try multiple sources)
         session_id = (
@@ -860,7 +833,7 @@ async def _salesiq_webhook_inner(request: dict):
                     logger.info(f"[Conversation] User has NEW question after resolution - restarting conversation")
                     conversation_should_restart = True
                     # Reset state to active
-                    state_manager.start_session(session_id)
+                    state_manager.create_session(session_id, category="other")
                     
                 elif user_wants_to_close:
                     logger.info(f"[Conversation] User confirmed chat closure")
@@ -1119,9 +1092,8 @@ async def _salesiq_webhook_inner(request: dict):
             
             # Send final satisfaction message - chat will close via idle timeout
             response_text = (
-                "Excellent! I'm happy the issue is resolved. 😊\n\n"
-                "If you need anything else, just type your question. Otherwise, this chat will close automatically after a few moments of inactivity.\n\n"
-                "Have a great day!"
+                "Great! I'm glad the issue is resolved. 😊\n\n"
+                "If you need anything else, just let me know!"
             )
             
             conversations[session_id].append({"role": "user", "content": message_text})
